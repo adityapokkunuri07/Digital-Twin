@@ -1,0 +1,23 @@
+# Task List - Digital Twin Implementation
+
+- [x] Phase 1: Database & Environment Setup
+    - [x] Create `db/schema.sql` database schema
+    - [x] Configure `backend/app/core/config.py`
+    - [x] Implement abstract/mock `backend/app/core/database.py`
+- [x] Phase 2: Middleware & RAG Services
+    - [x] Implement `backend/app/core/middleware.py` (PII Sanitization)
+    - [x] Implement `backend/app/services/embedding_service.py`
+    - [x] Implement `backend/app/services/ingestion_service.py` (Markdown parser, gap-filling, parent path)
+    - [x] Implement `backend/app/services/hybrid_rag_service.py` (Multi-lane search, score fusion, 0.85 gate, parent hydration)
+    - [x] Implement `backend/app/services/feasibility_validator.py` (Clinical safety checks)
+    - [x] Implement `backend/app/services/obsidian_service.py` (Audit vault export)
+    - [x] Implement `backend/app/services/journalist_service.py` (AI Onboarding saturation)
+- [x] Phase 3: LangGraph State Machine & REST API
+    - [x] Implement `backend/app/orchestrator/state_machine.py` (LangGraph 4-node flow, safety escalation)
+    - [x] Implement FastAPI endpoints in `backend/app/api/endpoints.py` and `backend/app/main.py`
+- [x] Phase 4: Frontend Control Plane UI
+    - [x] Initialize React + Vite + Tailwind CSS dashboard under `frontend/`
+    - [x] Build workflow configurator canvas, onboarding journalist wizard, and ingestion hub panels
+- [x] Phase 5: Verification & Testing
+    - [x] Add unit tests under `backend/tests/` (PII, feasibility, ingestion, hybrid RAG, LangGraph)
+    - [x] Run pytest suite and verify 100% test completion
