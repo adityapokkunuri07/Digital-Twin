@@ -1,17 +1,35 @@
+"""
+Obsidian Export Service — ExportService implementation.
+
+Projects database state to physical Markdown files in an Obsidian Vault
+with YAML frontmatter containing CoT, quarantine, and unlearning metadata.
+
+Moved from services/obsidian_service.py to services/export/ for
+proper Open/Closed adherence — future exporters (Notion, S3, etc.)
+can be added alongside without modifying existing code.
+"""
 import os
 import json
 from typing import List, Dict, Any
-from uuid import UUID
 import logging
+
+from backend.app.core.interfaces.export import ExportService
 
 logger = logging.getLogger(__name__)
 
-class ObsidianExportService:
-    def __init__(self, vault_path: str = "c:/Users/harin/Downloads/doctor/Digital-Twin/obsidian_vault"):
+
+class ObsidianExportService(ExportService):
+    """
+    Concrete ExportService that mirrors DB state to Obsidian Vault markdown files.
+    Handles both config-level and individual CoT node-level exports.
+    """
+
+    def __init__(self, vault_path: str):
         self.vault_path = vault_path
         self._ensure_directories()
 
-    def _ensure_directories(self):
+    def _ensure_directories(self) -> None:
+        """Create vault subdirectories if they don't exist."""
         try:
             os.makedirs(os.path.join(self.vault_path, "configs"), exist_ok=True)
             os.makedirs(os.path.join(self.vault_path, "cot_nodes"), exist_ok=True)
@@ -20,12 +38,16 @@ class ObsidianExportService:
             logger.error(f"Error creating Obsidian directories: {e}")
 
     def export_config(
-        self, config: Dict[str, Any], nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]
+        self,
+        config: Dict[str, Any],
+        nodes: List[Dict[str, Any]],
+        edges: List[Dict[str, Any]],
     ) -> str:
         """
         Exports Twin workflow config and associated CoT graph to the vault.
+
         Returns:
-            str: Path of the main config file written.
+            Path of the main config file written.
         """
         config_id = config.get("config_id")
         doctor_id = config.get("doctor_id")
@@ -47,7 +69,7 @@ class ObsidianExportService:
             f"feasible: {str(is_feasible).lower()}",
             "errors: " + json.dumps(errors),
             "type: twin_config",
-            "---"
+            "---",
         ]
 
         # Build content
@@ -55,15 +77,23 @@ class ObsidianExportService:
             f"# Twin Workflow Configuration: {config_id}",
             "",
             "## Configuration Workflow Steps",
-            ""
+            "",
         ]
 
         steps = workflow_config.get("steps", [])
         for step in steps:
-            content_lines.append(f"### Step: {step.get('name', 'Unnamed')} (ID: {step.get('id')})")
-            content_lines.append(f"- **Inputs**: {', '.join(step.get('inputs', []))}")
-            content_lines.append(f"- **Outputs**: {', '.join(step.get('outputs', []))}")
-            content_lines.append(f"- **Dependencies**: {', '.join(step.get('dependencies', []))}")
+            content_lines.append(
+                f"### Step: {step.get('name', 'Unnamed')} (ID: {step.get('id')})"
+            )
+            content_lines.append(
+                f"- **Inputs**: {', '.join(step.get('inputs', []))}"
+            )
+            content_lines.append(
+                f"- **Outputs**: {', '.join(step.get('outputs', []))}"
+            )
+            content_lines.append(
+                f"- **Dependencies**: {', '.join(step.get('dependencies', []))}"
+            )
             content_lines.append("")
 
         # Add references to CoT nodes
@@ -73,7 +103,9 @@ class ObsidianExportService:
             node_id = node.get("node_id")
             title = node.get("title", f"Node {node_id}")
             # Obsidian Wiki-link
-            content_lines.append(f"- [[node_{node_id}|{title}]] ({node.get('node_type', 'intake')})")
+            content_lines.append(
+                f"- [[node_{node_id}|{title}]] ({node.get('node_type', 'intake')})"
+            )
 
         full_content = "\n".join(yaml_lines + [""] + content_lines)
 
@@ -85,8 +117,19 @@ class ObsidianExportService:
             logger.error(f"Failed to write Obsidian config: {e}")
 
         # 2. Export individual CoT nodes
-        # Create map of node_id -> edges list
-        outgoing_edges = {}
+        self._export_cot_nodes(config_id, nodes, edges)
+
+        return config_filepath
+
+    def _export_cot_nodes(
+        self,
+        config_id: str,
+        nodes: List[Dict[str, Any]],
+        edges: List[Dict[str, Any]],
+    ) -> None:
+        """Export individual CoT node files with YAML frontmatter and edge links."""
+        # Build outgoing edges map
+        outgoing_edges: Dict[str, List] = {}
         for edge in edges:
             src = str(edge["source_node_id"])
             tgt = str(edge["target_node_id"])
@@ -102,18 +145,22 @@ class ObsidianExportService:
             body = node.get("content", "")
             meta = node.get("metadata", {})
 
-            node_filepath = os.path.join(self.vault_path, "cot_nodes", f"node_{node_id}.md")
+            node_filepath = os.path.join(
+                self.vault_path, "cot_nodes", f"node_{node_id}.md"
+            )
 
             node_yaml = [
                 "---",
                 f"id: {node_id}",
                 f"config_id: {config_id}",
                 f"node_type: {node_type}",
-                f"title: \"{title}\"",
+                f'title: "{title}"',
                 f"unlearned: {str(meta.get('unlearned', False)).lower()}",
             ]
             if "unlearning_reason" in meta:
-                node_yaml.append(f"unlearning_reason: \"{meta['unlearning_reason']}\"")
+                node_yaml.append(
+                    f"unlearning_reason: \"{meta['unlearning_reason']}\""
+                )
             node_yaml.append("---")
 
             node_content = [
@@ -122,7 +169,7 @@ class ObsidianExportService:
                 "## Content",
                 "",
                 body,
-                ""
+                "",
             ]
 
             # Append links to target nodes
@@ -140,5 +187,3 @@ class ObsidianExportService:
                     f.write(full_node_content)
             except Exception as e:
                 logger.error(f"Failed to write Obsidian node {node_id}: {e}")
-
-        return config_filepath

@@ -1,31 +1,230 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Activity, 
-  Layers, 
-  UserCheck, 
-  FileText, 
-  FolderOpen, 
-  Send, 
-  ShieldAlert, 
-  RefreshCw, 
-  CheckCircle2, 
-  AlertTriangle,
-  Play,
-  RotateCcw,
-  Sparkles,
-  Search,
-  Eye,
-  Trash2
+  Activity, Layers, UserCheck, FileText, FolderOpen, Send, 
+  ShieldAlert, RefreshCw, CheckCircle2, AlertTriangle,
+  Play, RotateCcw, Sparkles, Search, Eye, Trash2,
+  ChevronDown, ChevronRight, Folder, File
 } from 'lucide-react';
 
 const API_BASE = "http://localhost:8000/api";
 const DOCTOR_ID = "4a8f39b6-89d1-4db8-bbbe-d9616e00b8e2";
 
+const buildFileTree = (files) => {
+  const root = { name: 'root', children: [], isFolder: true };
+  
+  files.forEach(file => {
+    let path = file.path;
+    // Explode dot-notation for knowledge chunks
+    if (path.startsWith('knowledge/')) {
+       let subPath = path.substring(10);
+       if (subPath.endsWith('.md')) {
+          subPath = subPath.substring(0, subPath.length - 3);
+          const parts = subPath.split('.');
+          parts[parts.length - 1] += '.md';
+          path = 'knowledge/' + parts.join('/');
+       }
+    }
+    
+    const parts = path.split('/');
+    let currentLevel = root.children;
+    
+    parts.forEach((part, index) => {
+      let existing = currentLevel.find(item => item.name === part);
+      
+      if (index === parts.length - 1) {
+        if (!existing) {
+          currentLevel.push({ name: part, isFile: true, fileData: file });
+        } else {
+          existing.isFile = true;
+          existing.fileData = file;
+        }
+      } else {
+        if (!existing) {
+          existing = { name: part, isFolder: true, children: [], isOpen: true };
+          currentLevel.push(existing);
+        } else if (!existing.children) {
+          existing.isFolder = true;
+          existing.children = [];
+          existing.isOpen = true;
+        }
+        currentLevel = existing.children;
+      }
+    });
+  });
+  
+  return root.children;
+};
+
+const FileTreeNode = ({ node, level, selectedFile, onSelect, onUnlearnSelect }) => {
+  const [isOpen, setIsOpen] = useState(node.isOpen);
+  const paddingLeft = level * 16 + 10;
+
+  if (node.isFile) {
+    const file = node.fileData;
+    const isSelected = selectedFile?.path === file.path;
+    return (
+      <div 
+        onClick={() => {
+          onSelect(file);
+          if (file.node_id) onUnlearnSelect(file.node_id);
+        }}
+        style={{ 
+          display: 'flex', alignItems: 'center', gap: '6px', 
+          padding: `6px 10px 6px ${paddingLeft}px`,
+          cursor: 'pointer',
+          background: isSelected ? 'rgba(255,255,255,0.08)' : 'transparent',
+          borderLeft: isSelected ? '2px solid var(--primary)' : '2px solid transparent',
+          color: file.quarantine_status ? 'var(--error)' : 'var(--text-primary)',
+          borderRadius: '4px',
+          margin: '2px 0'
+        }}
+      >
+        <File size={14} style={{ color: file.quarantine_status ? 'var(--error)' : 'var(--primary)', flexShrink: 0 }} />
+        <span style={{ fontSize: '12px', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {node.name}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div 
+        onClick={() => setIsOpen(!isOpen)}
+        style={{ 
+          display: 'flex', alignItems: 'center', gap: '6px', 
+          padding: `6px 10px 6px ${paddingLeft - 4}px`,
+          cursor: 'pointer',
+          color: 'var(--text-secondary)',
+          borderRadius: '4px'
+        }}
+      >
+        {isOpen ? <ChevronDown size={14} style={{ flexShrink: 0 }} /> : <ChevronRight size={14} style={{ flexShrink: 0 }} />}
+        <Folder size={14} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+        <span style={{ fontSize: '13px', fontWeight: 500 }}>
+          {node.name}
+        </span>
+      </div>
+      {isOpen && (
+        <div>
+          {node.children.map((child, i) => (
+            <FileTreeNode 
+              key={i} 
+              node={child} 
+              level={level + 1} 
+              selectedFile={selectedFile}
+              onSelect={onSelect}
+              onUnlearnSelect={onUnlearnSelect}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const buildChunkTree = (chunks) => {
+  const root = { name: 'root', children: [], isFolder: true };
+  
+  chunks.forEach(chunk => {
+    let path = chunk.current_path || chunk.title.toLowerCase().replace(/\s+/g, '_');
+    const parts = path.split('.');
+    let currentLevel = root.children;
+    
+    parts.forEach((part, index) => {
+      let existing = currentLevel.find(item => item.name === part);
+      
+      if (index === parts.length - 1) {
+        if (!existing) {
+          currentLevel.push({ name: part, isChunk: true, chunkData: chunk });
+        } else {
+          existing.isChunk = true;
+          existing.chunkData = chunk;
+        }
+      } else {
+        if (!existing) {
+          existing = { name: part, isFolder: true, children: [], isOpen: true };
+          currentLevel.push(existing);
+        } else if (!existing.children) {
+          existing.isFolder = true;
+          existing.children = [];
+          existing.isOpen = true;
+        }
+        currentLevel = existing.children;
+      }
+    });
+  });
+  
+  return root.children;
+};
+
+const ChunkTreeNode = ({ node, level }) => {
+  const [isOpen, setIsOpen] = useState(true);
+  const paddingLeft = level * 16;
+  const chunk = node.chunkData;
+  const hasChildren = node.children && node.children.length > 0;
+
+  return (
+    <div style={{ marginLeft: paddingLeft + 'px', marginBottom: node.isFolder ? '0' : '12px' }}>
+      {(node.isFolder || hasChildren) && (
+        <div 
+          onClick={() => setIsOpen(!isOpen)}
+          style={{ 
+            display: 'flex', alignItems: 'center', gap: '8px', 
+            padding: '8px 12px', cursor: 'pointer', color: 'var(--text-primary)',
+            borderRadius: '8px', marginBottom: '8px', background: 'rgba(255,255,255,0.03)',
+            border: '1px solid var(--border-light)'
+          }}
+        >
+          {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          <Folder size={16} style={{ color: 'var(--primary)' }} />
+          <span style={{ fontSize: '14px', fontWeight: 600, fontFamily: 'monospace' }}>
+            {node.name}
+          </span>
+        </div>
+      )}
+
+      {(!node.isFolder || isOpen) && (
+        <div style={{ marginLeft: (node.isFolder || hasChildren) ? '24px' : '0px' }}>
+          {node.isChunk && chunk && (
+            <div style={{ 
+              marginBottom: '12px', padding: '16px', background: 'rgba(255,255,255,0.02)',
+              border: '1px solid var(--border-light)', borderRadius: '12px', fontSize: '13px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <FileText size={16} style={{ color: 'var(--primary)' }} />
+                <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--text-primary)' }}>{chunk.title}</h4>
+              </div>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '12px', lineHeight: '1.5' }}>{chunk.content}</p>
+              
+              {chunk.tags && chunk.tags.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                  {chunk.tags.map((t, i) => <span key={i} className="badge badge-info" style={{ fontSize: '10px', padding: '4px 8px' }}>{t}</span>)}
+                </div>
+              )}
+              
+              {chunk.synthetic_questions && chunk.synthetic_questions.length > 0 && (
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '6px' }}>
+                  <strong style={{ color: 'var(--secondary)' }}>Q:</strong> {chunk.synthetic_questions[0]}
+                </div>
+              )}
+            </div>
+          )}
+
+          {hasChildren && node.children.map((child, i) => (
+            <ChunkTreeNode key={i} node={child} level={0} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('workflow');
   
   // --- Global State ---
-  const [configId, setConfigId] = useState('8d3bc310-b9ab-4228-b0a6-993d5a2d67ea');
+  const [configId, setConfigId] = useState('11111111-1111-1111-1111-111111111111'); // Matches sample_data.sql
   const [activeVersion, setActiveVersion] = useState('1.0.0');
   const [isFeasible, setIsFeasible] = useState(true);
   const [validationErrors, setValidationErrors] = useState([]);
@@ -74,6 +273,7 @@ export default function App() {
 
   // --- Obsidian & Unlearning State ---
   const [obsidianFiles, setObsidianFiles] = useState([]);
+  const [selectedObsidianFile, setSelectedObsidianFile] = useState(null);
   const [unlearnNodeInput, setUnlearnNodeInput] = useState('');
   const [unlearnRationale, setUnlearnRationale] = useState('Guidelines changed due to updated AHA recommendations.');
 
@@ -176,8 +376,15 @@ export default function App() {
         
         // Log to synced files
         setObsidianFiles(prev => [
-          `configs/config_${configId}.md`, 
-          ...prev.filter(f => !f.includes(configId))
+          {
+            path: `configs/config_${configId}.md`,
+            type: 'config',
+            node_id: crypto.randomUUID(),
+            title: `Workflow Config ${activeVersion}`,
+            content: `Configuration for Dr. Sterling.\nNodes: ${steps.length}`,
+            tags: ["config", "workflow"]
+          },
+          ...prev.filter(f => !f.path.includes(configId))
         ]);
         alert("Configuration saved & exported to Obsidian Vault!");
         return;
@@ -188,7 +395,14 @@ export default function App() {
 
     // Mock response
     const check = await handleValidateConfig();
-    setObsidianFiles(prev => [`configs/config_${configId}.md`, ...prev]);
+    setObsidianFiles(prev => [{
+      path: `configs/config_${configId}.md`,
+      type: 'config',
+      node_id: crypto.randomUUID(),
+      title: `Workflow Config ${activeVersion}`,
+      content: `Configuration for Dr. Sterling.\nNodes: ${steps.length}`,
+      tags: ["config", "workflow"]
+    }, ...prev.filter(f => !f.path.includes(configId))]);
     alert(`[MOCK DB] Config saved! Feasibility: ${check.is_feasible ? 'SUCCESS' : 'FAILED'}`);
   };
 
@@ -246,12 +460,12 @@ export default function App() {
         alert(`Onboarding finalized! Nodes: ${data.nodes_count}, Edges: ${data.edges_count}`);
         
         // Load files list
-        setObsidianFiles(prev => [
-          "cot_nodes/node_intake.md",
-          "cot_nodes/node_evaluation.md",
-          "cot_nodes/node_action.md",
-          ...prev
-        ]);
+        const cotFiles = [
+          { path: "cot_nodes/node_intake.md", type: "cot", node_id: crypto.randomUUID(), title: "Intake CoT", content: "Collect vitals...", tags: ["onboarding"] },
+          { path: "cot_nodes/node_evaluation.md", type: "cot", node_id: crypto.randomUUID(), title: "Evaluation CoT", content: "Check parameters...", tags: ["onboarding"] },
+          { path: "cot_nodes/node_action.md", type: "cot", node_id: crypto.randomUUID(), title: "Action CoT", content: "Trigger escalation...", tags: ["onboarding"] }
+        ];
+        setObsidianFiles(prev => [...cotFiles, ...prev]);
         return;
       } catch (err) {
         alert("Failed to finalize: Saturation score must be >= 0.90");
@@ -260,12 +474,12 @@ export default function App() {
     }
 
     // Mock onboarding nodes
-    setObsidianFiles(prev => [
-      "cot_nodes/node_intake.md",
-      "cot_nodes/node_evaluation.md",
-      "cot_nodes/node_action.md",
-      ...prev
-    ]);
+    const cotFiles = [
+      { path: "cot_nodes/node_intake.md", type: "cot", node_id: crypto.randomUUID(), title: "Intake CoT", content: "Collect vitals...", tags: ["onboarding"] },
+      { path: "cot_nodes/node_evaluation.md", type: "cot", node_id: crypto.randomUUID(), title: "Evaluation CoT", content: "Check parameters...", tags: ["onboarding"] },
+      { path: "cot_nodes/node_action.md", type: "cot", node_id: crypto.randomUUID(), title: "Action CoT", content: "Trigger escalation...", tags: ["onboarding"] }
+    ];
+    setObsidianFiles(prev => [...cotFiles, ...prev]);
     alert("[MOCK ONBOARDING] CoT nodes and edges written to database and Obsidian Vault!");
   };
 
@@ -279,11 +493,40 @@ export default function App() {
           body: JSON.stringify({ config_id: configId, raw_text: rawText })
         });
         const data = await res.json();
+        
+        if (!res.ok) {
+          console.error("Server error:", data.detail || data);
+          alert("Ingestion failed: " + (data.detail || "Server Error"));
+          setIngesting(false);
+          return;
+        }
+
         setIngestedChunks(data.chunks);
+        
+        const newFiles = data.chunks.map(c => ({
+          path: `knowledge/${c.current_path || c.title.toLowerCase().replace(/\s+/g, '_')}.md`,
+          type: 'knowledge',
+          node_id: c.chunk_id || crypto.randomUUID(),
+          parent_id: c.parent_path || "",
+          title: c.title,
+          content: c.content,
+          tags: c.tags || [],
+          chain_of_thought: (c.synthetic_questions && c.synthetic_questions.length > 0) ? c.synthetic_questions[0] : "",
+          quarantine_status: false,
+          unlearning_rationale: ""
+        }));
+        
+        setObsidianFiles(prev => {
+          const filtered = prev.filter(f => !f.path.startsWith('knowledge/'));
+          return [...newFiles, ...filtered];
+        });
+
         setIngesting(false);
         return;
       } catch (err) {
         console.error("Ingestion failed", err);
+        alert("Failed to connect to backend for ingestion.");
+        setIngesting(false);
       }
     }
 
@@ -301,11 +544,83 @@ export default function App() {
     }, 1000);
   };
 
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setIngesting(true);
+    const formData = new FormData();
+    formData.append('config_id', configId);
+    formData.append('file', file);
+
+    if (apiStatus === 'online') {
+      try {
+        const res = await fetch(`${API_BASE}/config/upload`, {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        
+        if (!res.ok) {
+          console.error("Upload error:", data.detail || data);
+          alert("Upload failed: " + (data.detail || "Server Error"));
+          setIngesting(false);
+          return;
+        }
+
+        setIngestedChunks(data.chunks);
+        if (data.raw_text) {
+          setRawText(data.raw_text);
+        }
+        
+        const newFiles = data.chunks.map(c => ({
+          path: `knowledge/${c.current_path || c.title.toLowerCase().replace(/\s+/g, '_')}.md`,
+          type: 'knowledge',
+          node_id: c.chunk_id || crypto.randomUUID(),
+          parent_id: c.parent_path || "",
+          title: c.title,
+          content: c.content,
+          tags: c.tags || [],
+          chain_of_thought: (c.synthetic_questions && c.synthetic_questions.length > 0) ? c.synthetic_questions[0] : "",
+          quarantine_status: false,
+          unlearning_rationale: ""
+        }));
+        
+        setObsidianFiles(prev => {
+          const filtered = prev.filter(f => !f.path.startsWith('knowledge/'));
+          return [...newFiles, ...filtered];
+        });
+
+        setIngesting(false);
+        return;
+      } catch (err) {
+        console.error("Upload failed", err);
+        alert("Failed to connect to backend for upload.");
+        setIngesting(false);
+      }
+    } else {
+       alert("API Offline. Mock mode only supports manual text pasting.");
+       setIngesting(false);
+    }
+  };
+
   const handleUnlearn = async () => {
     if (!unlearnNodeInput.trim()) return;
     const payload = {
       node_ids: [unlearnNodeInput],
       rationale: unlearnRationale
+    };
+    
+    const updateLocalState = () => {
+      setObsidianFiles(prev => prev.map(f => {
+        if (f.node_id === unlearnNodeInput || f.path.includes(unlearnNodeInput)) {
+          return { ...f, quarantine_status: true, unlearning_rationale: unlearnRationale };
+        }
+        return f;
+      }));
+      if (selectedObsidianFile && (selectedObsidianFile.node_id === unlearnNodeInput || selectedObsidianFile.path.includes(unlearnNodeInput))) {
+        setSelectedObsidianFile(prev => ({ ...prev, quarantine_status: true, unlearning_rationale: unlearnRationale }));
+      }
     };
 
     if (apiStatus === 'online') {
@@ -316,6 +631,7 @@ export default function App() {
           body: JSON.stringify(payload)
         });
         await res.json();
+        updateLocalState();
         alert("Mom-and-Child Unlearning complete. Vector tombstoned!");
         return;
       } catch (err) {
@@ -323,6 +639,7 @@ export default function App() {
       }
     }
 
+    updateLocalState();
     alert(`[MOCK UNLEARNING] Node ${unlearnNodeInput} tombstoned successfully. Embedding set to NULL!`);
   };
 
@@ -451,12 +768,29 @@ export default function App() {
     handleValidateConfig(updated);
   };
 
+  const generateMarkdown = (file) => {
+    if (!file) return "";
+    return `---
+node_id: "${file.node_id}"
+parent_id: "${file.parent_id || 'root'}"
+sync_status: "verified"
+chain_of_thought: |
+  "${file.chain_of_thought || ''}"
+tags: [${(file.tags || []).join(', ')}]
+quarantine_status: ${file.quarantine_status || false}
+${file.quarantine_status ? `unlearning_rationale: "${file.unlearning_rationale}"\ndeprecated_at: "${new Date().toISOString()}"\n` : ''}---
+
+# ${file.title || 'Untitled Node'}
+${file.content || ''}
+`;
+  };
+
   return (
     <div className="app-container">
       {/* LEFT SIDEBAR */}
       <aside className="sidebar">
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '32px' }}>
-          <Activity size={24} style={{ color: 'hsl(var(--secondary))' }} className="animate-pulse-slow" />
+          <Activity size={24} style={{ color: 'var(--secondary)' }} className="animate-pulse-slow" />
           <h2 style={{ fontSize: '20px', fontFamily: 'var(--font-display)', fontWeight: 800 }}>
             AGENTIC TWIN
           </h2>
@@ -464,10 +798,10 @@ export default function App() {
 
         <div className="glass-card" style={{ padding: '16px', marginBottom: '24px', fontSize: '13px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-            <span style={{ height: '8px', width: '8px', borderRadius: '50%', backgroundColor: apiStatus === 'online' ? 'hsl(var(--success))' : 'hsl(var(--warning))' }}></span>
+            <span style={{ height: '8px', width: '8px', borderRadius: '50%', backgroundColor: apiStatus === 'online' ? 'var(--success)' : 'var(--warning)' }}></span>
             <span style={{ fontWeight: 600 }}>API Endpoint: {apiStatus.toUpperCase()}</span>
           </div>
-          <p style={{ color: 'hsl(var(--text-muted))' }}>Active Config: {configId.slice(0, 8)}...</p>
+          <p style={{ color: 'var(--text-muted)' }}>Active Config: {configId.slice(0, 8)}...</p>
         </div>
 
         <nav style={{ flex: 1 }}>
@@ -504,7 +838,7 @@ export default function App() {
           </button>
         </nav>
 
-        <div style={{ fontSize: '12px', color: 'hsl(var(--text-muted))', textAlign: 'center' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center' }}>
           Digital Twin Engine v1.0.0
         </div>
       </aside>
@@ -525,20 +859,20 @@ export default function App() {
             }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyItems: 'center', gap: '12px' }}>
                 {isFeasible ? (
-                  <CheckCircle2 size={24} style={{ color: 'hsl(var(--success))' }} />
+                  <CheckCircle2 size={24} style={{ color: 'var(--success)' }} />
                 ) : (
-                  <AlertTriangle size={24} style={{ color: 'hsl(var(--error))' }} />
+                  <AlertTriangle size={24} style={{ color: 'var(--error)' }} />
                 )}
                 <div>
                   <h3 style={{ fontSize: '18px', fontWeight: 600 }}>
                     Feasibility Compiler Check: {isFeasible ? 'VALID GRAPH' : 'INVALID COMPILATION'}
                   </h3>
                   {isFeasible ? (
-                    <p style={{ color: 'hsl(var(--text-secondary))', fontSize: '14px' }}>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
                       All variable propagation sequences satisfied. No circular dependencies found.
                     </p>
                   ) : (
-                    <ul style={{ color: 'hsl(var(--error))', fontSize: '13px', marginTop: '6px', paddingLeft: '20px' }}>
+                    <ul style={{ color: 'var(--error)', fontSize: '13px', marginTop: '6px', paddingLeft: '20px' }}>
                       {validationErrors.map((err, i) => <li key={i}>{err}</li>)}
                     </ul>
                   )}
@@ -552,7 +886,7 @@ export default function App() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
                   <h3 style={{ fontSize: '18px' }}>Workflow Steps Layout</h3>
                   <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                    <label style={{ fontSize: '13px', color: 'hsl(var(--text-muted))' }}>Auto-pilot</label>
+                    <label style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Auto-pilot</label>
                     <input 
                       type="checkbox" 
                       checked={autopilot} 
@@ -569,12 +903,12 @@ export default function App() {
                       alignItems: 'center',
                       padding: '16px',
                       background: 'rgba(255,255,255,0.02)',
-                      border: '1px solid hsl(var(--border-light))',
+                      border: '1px solid var(--border-light)',
                       borderRadius: '8px'
                     }}>
                       <div>
                         <h4 style={{ fontWeight: 600 }}>{idx + 1}. {step.name}</h4>
-                        <div style={{ display: 'flex', gap: '16px', fontSize: '12px', marginTop: '6px', color: 'hsl(var(--text-secondary))' }}>
+                        <div style={{ display: 'flex', gap: '16px', fontSize: '12px', marginTop: '6px', color: 'var(--text-secondary)' }}>
                           <span><strong>Inputs:</strong> {step.inputs.join(', ') || 'None'}</span>
                           <span><strong>Outputs:</strong> {step.outputs.join(', ') || 'None'}</span>
                           <span><strong>Depends:</strong> {step.dependencies.join(', ') || 'None'}</span>
@@ -582,7 +916,7 @@ export default function App() {
                       </div>
                       <button 
                         onClick={() => deleteStep(step.id)}
-                        style={{ background: 'transparent', border: 'none', color: 'hsl(var(--error))', cursor: 'pointer' }}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--error)', cursor: 'pointer' }}
                       >
                         <Trash2 size={16} />
                       </button>
@@ -648,11 +982,11 @@ export default function App() {
               <h3 style={{ fontSize: '18px', marginBottom: '16px' }}>Journalist Interview Terminal</h3>
               
               {/* Chat display */}
-              <div style={{ flex: 1, overflowY: 'auto', border: '1px solid hsl(var(--border-light))', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(0,0,0,0.2)' }}>
+              <div style={{ flex: 1, overflowY: 'auto', border: '1px solid var(--border-light)', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(0,0,0,0.2)' }}>
                 {chatLog.map((c, i) => (
                   <div key={i} style={{ 
                     alignSelf: c.sender === 'journalist' ? 'flex-start' : 'flex-end',
-                    background: c.sender === 'journalist' ? 'hsl(var(--bg-tertiary))' : 'hsl(var(--primary))',
+                    background: c.sender === 'journalist' ? 'var(--bg-tertiary)' : 'var(--primary)',
                     padding: '10px 14px',
                     borderRadius: '8px',
                     maxWidth: '80%',
@@ -692,16 +1026,16 @@ export default function App() {
                 </div>
                 
                 {/* Progress bar */}
-                <div style={{ height: '12px', width: '100%', background: 'hsl(var(--bg-tertiary))', borderRadius: '6px', overflow: 'hidden', marginBottom: '12px' }}>
+                <div style={{ height: '12px', width: '100%', background: 'var(--bg-tertiary)', borderRadius: '6px', overflow: 'hidden', marginBottom: '12px' }}>
                   <div style={{ 
                     height: '100%', 
                     width: `${saturationScore * 100}%`, 
-                    background: 'linear-gradient(90deg, hsl(var(--primary)), hsl(var(--secondary)))',
+                    background: 'linear-gradient(90deg, var(--primary), var(--secondary))',
                     transition: 'width 0.4s ease'
                   }}></div>
                 </div>
                 
-                <p style={{ fontSize: '12px', color: 'hsl(var(--text-muted))' }}>
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                   Target Saturation limit is <strong>90%</strong> to ensure zero-hallucination epistemic fencing bounds are complete.
                 </p>
               </div>
@@ -724,9 +1058,37 @@ export default function App() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '24px' }}>
             <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <h3 style={{ fontSize: '18px' }}>Ingestion Console</h3>
+              
+              {/* Drag and Drop Zone */}
+              <div 
+                className="upload-zone"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    handleFileUpload({ target: { files: [e.dataTransfer.files[0]] } });
+                  }
+                }}
+              >
+                <FolderOpen size={32} style={{ color: 'var(--primary)', marginBottom: '12px' }} />
+                <h4 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '4px' }}>Drag & Drop clinical guidelines here</h4>
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>Supports PDF, TXT, MD</p>
+                
+                <label className="btn btn-secondary" style={{ cursor: 'pointer' }}>
+                  Browse Files
+                  <input type="file" accept=".pdf,.txt,.md" style={{ display: 'none' }} onChange={handleFileUpload} disabled={ingesting} />
+                </label>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', margin: '4px 0' }}>
+                <div style={{ flex: 1, height: '1px', background: 'var(--border-light)' }}></div>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600 }}>OR PASTE TEXT</span>
+                <div style={{ flex: 1, height: '1px', background: 'var(--border-light)' }}></div>
+              </div>
+
               <textarea 
                 className="form-input"
-                style={{ flex: 1, minHeight: '300px', fontFamily: 'monospace', fontSize: '13px', resize: 'vertical' }}
+                style={{ flex: 1, minHeight: '180px', fontFamily: 'monospace', fontSize: '13px', resize: 'vertical' }}
                 value={rawText}
                 onChange={e => setRawText(e.target.value)}
               />
@@ -746,36 +1108,13 @@ export default function App() {
             <div className="glass-card" style={{ overflowY: 'auto', maxHeight: '520px' }}>
               <h3 style={{ fontSize: '18px', marginBottom: '16px' }}>Extracted Nodes</h3>
               {ingestedChunks.length === 0 ? (
-                <div style={{ color: 'hsl(var(--text-muted))', textAlign: 'center', padding: '40px 0' }}>
+                <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '40px 0' }}>
                   No guidelines ingested yet.
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {ingestedChunks.map((chunk, idx) => (
-                    <div key={idx} style={{ 
-                      padding: '12px', 
-                      background: 'rgba(255,255,255,0.02)',
-                      border: '1px solid hsl(var(--border-light))',
-                      borderRadius: '8px',
-                      fontSize: '13px'
-                    }}>
-                      <span style={{ fontSize: '11px', color: 'hsl(var(--secondary))', fontWeight: 600 }}>
-                        {chunk.parent_path}
-                      </span>
-                      <h4 style={{ fontWeight: 600, margin: '4px 0' }}>{chunk.title}</h4>
-                      <p style={{ color: 'hsl(var(--text-secondary))', marginBottom: '6px' }}>{chunk.content}</p>
-                      
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '4px' }}>
-                        {chunk.tags.map((t, i) => (
-                          <span key={i} className="badge badge-info" style={{ fontSize: '9px', padding: '2px 6px' }}>
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                      <div style={{ fontSize: '10px', color: 'hsl(var(--text-muted))' }}>
-                        <strong>Q:</strong> {chunk.synthetic_questions[0]}
-                      </div>
-                    </div>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {buildChunkTree(ingestedChunks).map((node, idx) => (
+                    <ChunkTreeNode key={idx} node={node} level={0} />
                   ))}
                 </div>
               )}
@@ -785,36 +1124,75 @@ export default function App() {
 
         {/* OBSIDIAN AUDIT MAPPING TAB */}
         {activeTab === 'obsidian' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '24px' }}>
-            <div className="glass-card">
-              <h3 style={{ fontSize: '18px', marginBottom: '16px' }}>Obsidian Vault Synced Markdown Files</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '250px 1fr 340px', gap: '24px' }}>
+            {/* File Explorer */}
+            <div className="glass-card" style={{ maxHeight: '600px', overflowY: 'auto' }}>
+              <h3 style={{ fontSize: '18px', marginBottom: '16px' }}>Vault Files</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {obsidianFiles.length === 0 ? (
-                  <div style={{ color: 'hsl(var(--text-muted))', padding: '40px 0', textAlign: 'center' }}>
+                  <div style={{ color: 'var(--text-muted)', padding: '20px 0', textAlign: 'center', fontSize: '12px' }}>
                     No sync triggers recorded. Save configs or finalize onboarding.
                   </div>
                 ) : (
-                  obsidianFiles.map((file, i) => (
-                    <div key={i} style={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      gap: '10px', 
-                      padding: '12px',
-                      border: '1px solid hsl(var(--border-light))',
-                      borderRadius: '6px'
-                    }}>
-                      <FolderOpen size={16} style={{ color: 'hsl(var(--primary))' }} />
-                      <span style={{ fontSize: '14px', fontFamily: 'monospace' }}>{file}</span>
-                    </div>
+                  buildFileTree(obsidianFiles).map((node, i) => (
+                    <FileTreeNode 
+                      key={i} 
+                      node={node} 
+                      level={0}
+                      selectedFile={selectedObsidianFile}
+                      onSelect={(file) => setSelectedObsidianFile(file)}
+                      onUnlearnSelect={(id) => setUnlearnNodeInput(id)}
+                    />
                   ))
                 )}
               </div>
             </div>
 
+            {/* Markdown Viewer */}
+            <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', padding: '0', overflow: 'hidden', height: '600px' }}>
+              <div style={{ padding: '16px', borderBottom: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.2)' }}>
+                <h3 style={{ fontSize: '16px', margin: 0, fontFamily: 'monospace' }}>
+                  {selectedObsidianFile ? selectedObsidianFile.path : 'Select a file'}
+                </h3>
+              </div>
+              <div style={{ 
+                flex: 1, 
+                padding: '20px', 
+                overflowY: 'auto', 
+                fontFamily: 'monospace', 
+                fontSize: '13px', 
+                lineHeight: '1.6',
+                background: selectedObsidianFile?.quarantine_status ? 'rgba(255,50,50,0.02)' : 'transparent'
+              }}>
+                {selectedObsidianFile ? (
+                  <pre style={{ whiteSpace: 'pre-wrap', margin: 0, wordWrap: 'break-word' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      {(() => {
+                        const md = generateMarkdown(selectedObsidianFile);
+                        const parts = md.split('\n---');
+                        return parts[0] + '\n---';
+                      })()}
+                    </span>
+                    <span style={{ color: 'var(--text-primary)' }}>
+                      {(() => {
+                        const md = generateMarkdown(selectedObsidianFile);
+                        const parts = md.split('\n---');
+                        return parts.slice(1).join('\n---');
+                      })()}
+                    </span>
+                  </pre>
+                ) : (
+                  <div style={{ color: 'var(--text-muted)', display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+                    Select a Markdown file from the explorer to view the projected SSOT state.
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Mom-Child Unlearning panel */}
-            <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <h3 style={{ fontSize: '18px', color: 'hsl(var(--error))' }}>Retract Knowledge</h3>
-              <p style={{ fontSize: '12px', color: 'hsl(var(--text-muted))' }}>
+            <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '600px' }}>
+              <h3 style={{ fontSize: '18px', color: 'var(--error)' }}>Retract Knowledge</h3>
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                 Mom-and-Child Unlearning Protocol: Nullifies embedding vector in the SSOT database to disable semantic retrieve paths, while keeping YAML audit logs intact.
               </p>
               
@@ -838,7 +1216,7 @@ export default function App() {
                 />
               </div>
 
-              <button className="btn btn-primary" style={{ backgroundColor: 'hsl(var(--error))' }} onClick={handleUnlearn}>
+              <button className="btn btn-primary" style={{ backgroundColor: 'var(--error)' }} onClick={handleUnlearn}>
                 Tombstone Vector
               </button>
             </div>
@@ -881,7 +1259,7 @@ export default function App() {
               <div style={{ 
                 height: '180px', 
                 overflowY: 'auto', 
-                border: '1px solid hsl(var(--border-light))', 
+                border: '1px solid var(--border-light)', 
                 borderRadius: '8px', 
                 padding: '12px', 
                 background: 'rgba(0,0,0,0.3)',
@@ -892,13 +1270,13 @@ export default function App() {
                 gap: '8px'
               }}>
                 {sandboxLog.length === 0 ? (
-                  <span style={{ color: 'hsl(var(--text-muted))' }}>Console awaiting initialization...</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Console awaiting initialization...</span>
                 ) : (
                   sandboxLog.map((log, i) => (
                     <div key={i}>
                       <span style={{ 
-                        color: log.node === 'human_intercept' ? 'hsl(var(--error))' : 
-                               log.node === 'action_dispatch' ? 'hsl(var(--success))' : 'hsl(var(--secondary))',
+                        color: log.node === 'human_intercept' ? 'var(--error)' : 
+                               log.node === 'action_dispatch' ? 'var(--success)' : 'var(--secondary)',
                         fontWeight: 700 
                       }}>[{log.node.toUpperCase()}]</span> {log.msg}
                     </div>
@@ -917,13 +1295,13 @@ export default function App() {
                     <div><strong>Active Node:</strong> {activeSessionState.current_node}</div>
                     <div>
                       <strong>Requires Human:</strong> 
-                      <span style={{ marginLeft: '6px', color: activeSessionState.requires_review ? 'hsl(var(--error))' : 'hsl(var(--success))', fontWeight: 600 }}>
+                      <span style={{ marginLeft: '6px', color: activeSessionState.requires_review ? 'var(--error)' : 'var(--success)', fontWeight: 600 }}>
                         {activeSessionState.requires_review ? 'YES' : 'NO'}
                       </span>
                     </div>
                     <div>
                       <strong>State Paused:</strong> 
-                      <span style={{ marginLeft: '6px', color: activeSessionState.is_paused ? 'hsl(var(--error))' : 'hsl(var(--success))', fontWeight: 600 }}>
+                      <span style={{ marginLeft: '6px', color: activeSessionState.is_paused ? 'var(--error)' : 'var(--success)', fontWeight: 600 }}>
                         {activeSessionState.is_paused ? 'YES' : 'NO'}
                       </span>
                     </div>
@@ -935,7 +1313,7 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <div style={{ color: 'hsl(var(--text-muted))' }}>No active session.</div>
+                  <div style={{ color: 'var(--text-muted)' }}>No active session.</div>
                 )}
               </div>
             </div>

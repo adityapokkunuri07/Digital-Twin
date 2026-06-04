@@ -2,13 +2,13 @@ import asyncio
 from typing import List, Dict, Any, Tuple
 from uuid import UUID
 import logging
-from backend.app.core.database import DatabaseService
-from backend.app.services.embedding_service import EmbeddingService
+from backend.app.core.interfaces.repositories import KnowledgeRepository
+from backend.app.core.interfaces.embedding import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
 class HybridRAGEngine:
-    def __init__(self, db: DatabaseService, embedding_service: EmbeddingService):
+    def __init__(self, db: KnowledgeRepository, embedding_service: EmbeddingService):
         self.db = db
         self.embedding_service = embedding_service
         self.vector_weight = 0.7

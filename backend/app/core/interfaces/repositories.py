@@ -1,0 +1,147 @@
+"""
+Segregated Repository Interfaces — Interface Segregation Principle (ISP)
+
+Each interface defines a focused contract for a single domain entity.
+Consumers depend only on the interface they need, not a monolithic 13-method contract.
+"""
+from abc import ABC, abstractmethod
+from typing import List, Dict, Any, Optional
+from uuid import UUID
+
+
+class ConfigRepository(ABC):
+    """
+    Persistence contract for Expert Twin configuration records.
+    Consumed by: ConfigService, Orchestrator (to load workflow configs).
+    """
+
+    @abstractmethod
+    async def save_expert_config(
+        self,
+        config_id: UUID,
+        doctor_id: UUID,
+        workflow_config: Dict[str, Any],
+        active_version: str,
+        is_feasible: bool,
+        validation_errors: List[str],
+    ) -> Dict[str, Any]:
+        """Upsert an expert twin configuration record."""
+        ...
+
+    @abstractmethod
+    async def get_expert_config(self, config_id: UUID) -> Optional[Dict[str, Any]]:
+        """Retrieve a configuration by its ID. Returns None if not found."""
+        ...
+
+
+class KnowledgeRepository(ABC):
+    """
+    Persistence contract for knowledge chunk CRUD and search operations.
+    Consumed by: IngestionService, HybridRAGEngine.
+    """
+
+    @abstractmethod
+    async def delete_knowledge_chunks(self, config_id: UUID) -> None:
+        """Delete all knowledge chunks for a given configuration."""
+        ...
+
+    @abstractmethod
+    async def save_knowledge_chunks(
+        self, config_id: UUID, chunks: List[Dict[str, Any]]
+    ) -> None:
+        """Persist a batch of knowledge chunks for a configuration."""
+        ...
+
+    @abstractmethod
+    async def match_knowledge_chunks(
+        self, embedding: List[float], threshold: float, limit: int
+    ) -> List[Dict[str, Any]]:
+        """Perform vector similarity search via pgvector HNSW index."""
+        ...
+
+    @abstractmethod
+    async def match_knowledge_chunks_lexical(
+        self, query_text: str, threshold: float, limit: int
+    ) -> List[Dict[str, Any]]:
+        """Perform trigram-based lexical similarity search."""
+        ...
+
+    @abstractmethod
+    async def get_knowledge_chunk_by_path(
+        self, config_id: UUID, parent_path: str
+    ) -> Optional[Dict[str, Any]]:
+        """Retrieve a single knowledge chunk by its materialized path."""
+        ...
+
+
+class CotRepository(ABC):
+    """
+    Persistence contract for Chain of Thought graph nodes and edges.
+    Consumed by: OnboardingService, ConfigService, UnlearningService.
+    """
+
+    @abstractmethod
+    async def save_cot_nodes(
+        self, config_id: UUID, nodes: List[Dict[str, Any]]
+    ) -> None:
+        """Persist CoT nodes for a configuration."""
+        ...
+
+    @abstractmethod
+    async def get_cot_nodes(self, config_id: UUID) -> List[Dict[str, Any]]:
+        """Retrieve all CoT nodes for a configuration."""
+        ...
+
+    @abstractmethod
+    async def save_cot_edges(
+        self, config_id: UUID, edges: List[Dict[str, Any]]
+    ) -> None:
+        """Persist CoT edges for a configuration."""
+        ...
+
+    @abstractmethod
+    async def get_cot_edges(self, config_id: UUID) -> List[Dict[str, Any]]:
+        """Retrieve all CoT edges for a configuration."""
+        ...
+
+
+class SessionRepository(ABC):
+    """
+    Persistence contract for LangGraph session state checkpointing
+    and execution telemetry traces.
+    Consumed by: ZeroTrustOrchestrator.
+    """
+
+    @abstractmethod
+    async def get_active_session(
+        self, session_id: UUID
+    ) -> Optional[Dict[str, Any]]:
+        """Retrieve a session checkpoint by ID. Returns None if not found."""
+        ...
+
+    @abstractmethod
+    async def save_active_session(
+        self,
+        session_id: UUID,
+        conversation_id: UUID,
+        config_id: UUID,
+        current_node: str,
+        graph_state: Dict[str, Any],
+        is_paused: bool,
+        requires_review: bool,
+    ) -> Dict[str, Any]:
+        """Upsert a session state checkpoint."""
+        ...
+
+    @abstractmethod
+    async def create_execution_trace(
+        self,
+        session_id: UUID,
+        step_name: str,
+        prompt_used: str,
+        response_generated: str,
+        retrieved_chunk_ids: List[UUID],
+        classification_score: float,
+    ) -> Dict[str, Any]:
+        """Write an immutable execution trace to the telemetry ledger."""
+        ...

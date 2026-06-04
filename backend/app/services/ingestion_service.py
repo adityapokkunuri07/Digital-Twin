@@ -1,11 +1,11 @@
 import re
 from typing import List, Dict, Any, Optional
 from uuid import UUID, uuid4
-from backend.app.core.database import DatabaseService
-from backend.app.services.embedding_service import EmbeddingService
+from backend.app.core.interfaces.repositories import KnowledgeRepository
+from backend.app.core.interfaces.embedding import EmbeddingService
 
 class StructuralRAGIngestionPipeline:
-    def __init__(self, db: DatabaseService, embedding_service: EmbeddingService):
+    def __init__(self, db: KnowledgeRepository, embedding_service: EmbeddingService):
         self.db = db
         self.embedding_service = embedding_service
         # Synonym normalization mappings

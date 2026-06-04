@@ -1,13 +1,29 @@
-from typing import TypedDict, Dict, Any, List, Tuple, Optional
+"""
+Zero-Trust Orchestrator — LangGraph 4-Node State Machine.
+
+Refactored to follow Open/Closed Principle:
+- Data extraction is delegated to injected List[DataExtractor]
+- Anomaly detection is delegated to injected List[SafetyRule]
+- Adding new extractors or safety rules requires ZERO changes to this file
+
+Depends on segregated repository interfaces (DIP):
+- ConfigRepository for workflow config loading
+- SessionRepository for state checkpointing and telemetry
+"""
+from typing import TypedDict, Dict, Any, List
 from uuid import UUID, uuid4
 import logging
-import re
-from backend.app.core.database import DatabaseService
+
+from backend.app.core.interfaces.repositories import ConfigRepository, SessionRepository
 from backend.app.services.hybrid_rag_service import HybridRAGEngine
+from backend.app.orchestrator.extractors.base import DataExtractor
+from backend.app.orchestrator.safety_rules.base import SafetyRule
 
 logger = logging.getLogger(__name__)
 
+
 class AgentState(TypedDict):
+    """Typed state schema for the LangGraph execution thread."""
     session_id: str
     conversation_id: str
     config_id: str
@@ -23,11 +39,38 @@ class AgentState(TypedDict):
 
 
 class ZeroTrustOrchestrator:
-    def __init__(self, db: DatabaseService, rag_engine: HybridRAGEngine):
-        self.db = db
-        self.rag_engine = rag_engine
+    """
+    4-Node LangGraph execution engine with pluggable extractors and safety rules.
 
-    async def initialize_session(self, conversation_id: UUID, config_id: UUID) -> Dict[str, Any]:
+    Nodes:
+        1. Data Gathering — Adaptive extraction loops via injected extractors
+        2. Data Processing — Cross-reference against SSOT via Hybrid RAG
+        3. Human Intercept — Circuit breaker triggered by injected safety rules
+        4. Action Dispatch — Deterministic function execution
+
+    Open/Closed: New extractors and safety rules are injected at construction time.
+    To add a new extraction pattern or safety check, create a new class implementing
+    DataExtractor or SafetyRule and register it in the ServiceProvider.
+    """
+
+    def __init__(
+        self,
+        config_repo: ConfigRepository,
+        session_repo: SessionRepository,
+        rag_engine: HybridRAGEngine,
+        extractors: List[DataExtractor] | None = None,
+        safety_rules: List[SafetyRule] | None = None,
+    ):
+        self._config_repo = config_repo
+        self._session_repo = session_repo
+        self._rag_engine = rag_engine
+        self._extractors = extractors or []
+        self._safety_rules = safety_rules or []
+
+    async def initialize_session(
+        self, conversation_id: UUID, config_id: UUID
+    ) -> Dict[str, Any]:
+        """Create a new execution session with a clean initial state."""
         session_id = uuid4()
         initial_state: AgentState = {
             "session_id": str(session_id),
@@ -41,132 +84,135 @@ class ZeroTrustOrchestrator:
             "requires_review": False,
             "is_paused": False,
             "classification_score": 1.0,
-            "history": []
+            "history": [],
         }
-        await self.db.save_active_session(
-            session_id, conversation_id, config_id, 
-            initial_state["current_node"], initial_state, 
-            initial_state["is_paused"], initial_state["requires_review"]
+
+        await self._session_repo.save_active_session(
+            session_id, conversation_id, config_id,
+            initial_state["current_node"], initial_state,
+            initial_state["is_paused"], initial_state["requires_review"],
         )
         return initial_state
 
-    async def run_step(self, session_id: UUID, user_query: str) -> Dict[str, Any]:
+    async def run_step(
+        self, session_id: UUID, user_query: str
+    ) -> Dict[str, Any]:
         """
-        Executes a single transition step in the LangGraph 4-node state machine.
-        Locks the session state, evaluates transitions, and saves final checkpoints.
+        Execute a single transition step in the 4-node state machine.
+
+        Flow:
+        1. Load session checkpoint
+        2. Check concurrency lock (frozen sessions are rejected)
+        3. Node 1: Run all DataExtractors against user input
+        4. Check if all required inputs are gathered
+        5. Node 2: Data Processing via Hybrid RAG
+        6. Node 3: Run all SafetyRules — escalate if any trigger
+        7. Node 4: Action Dispatch — formulate response
+        8. Write telemetry trace
+        9. Save updated checkpoint
         """
-        # 1. Fetch current session checkpoint
-        session_record = await self.db.get_active_session(session_id)
+        # 1. Load session checkpoint
+        session_record = await self._session_repo.get_active_session(session_id)
         if not session_record:
             raise ValueError(f"Session with ID '{session_id}' not found.")
 
         state: AgentState = session_record["graph_state"]
         state["user_query"] = user_query
-        
-        # Check concurrency locking: if paused, prevent edits unless resolved by human
+
+        # 2. Concurrency lock check
         if state.get("is_paused", False) or state.get("requires_review", False):
-            state["output_message"] = "This session has been suspended and is awaiting expert human review. Operations are frozen."
+            state["output_message"] = (
+                "This session has been suspended and is awaiting expert human review. "
+                "Operations are frozen."
+            )
             return state
 
         config_id = UUID(state["config_id"])
-        config_record = await self.db.get_expert_config(config_id)
+        config_record = await self._config_repo.get_expert_config(config_id)
         workflow_config = config_record.get("workflow_config", {}) if config_record else {}
         steps = workflow_config.get("steps", [])
 
-        # 2. Determine variables to gather
-        # Check all input requirements in steps configuration
-        all_required_inputs = []
-        for step in steps:
-            all_required_inputs.extend(step.get("inputs", []))
-        all_required_inputs = list(set(all_required_inputs))
+        # Collect all required inputs from workflow config
+        all_required_inputs = list(set(
+            inp
+            for step in steps
+            for inp in step.get("inputs", [])
+        ))
 
-        # 3. Simulate Node 1: Data Gathering Node
-        # Parse user query to extract vitals or inputs (e.g. "temperature is 101", "temp: 99", "oxygen: 95")
+        # 3. Node 1: Data Gathering — run all injected extractors
         text = user_query.lower()
-        extracted = {}
-        
-        # Simple extraction rules
-        temp_match = re.search(r'(?:temp|temperature)(?:\s+is|:)?\s*(\d{2,3}(?:\.\d)?)', text)
-        if temp_match:
-            extracted["temperature"] = float(temp_match.group(1))
+        for extractor in self._extractors:
+            extracted = extractor.extract(text)
+            state["gathered_data"].update(extracted)
 
-        pain_match = re.search(r'(?:chest pain|chest tightness|pain in chest)', text)
-        if pain_match:
-            extracted["chest_pain"] = True
+        # Check if we're still missing required variables
+        missing_inputs = [
+            x for x in all_required_inputs
+            if x not in state["gathered_data"]
+        ]
 
-        sys_match = re.search(r'(?:bp|blood pressure)(?:\s+is|:)?\s*(\d{2,3})[/\s](\d{2,3})', text)
-        if sys_match:
-            extracted["blood_pressure_systolic"] = int(sys_match.group(1))
-            extracted["blood_pressure_diastolic"] = int(sys_match.group(2))
+        selected_chunks = []
 
-        # Update gathered data
-        state["gathered_data"].update(extracted)
-
-        # Evaluate if we are missing critical variables needed to progress
-        missing_inputs = [x for x in all_required_inputs if x not in state["gathered_data"]]
-        
         if missing_inputs:
+            # Stay in data gathering loop
             state["current_node"] = "data_gathering"
-            state["output_message"] = f"Please provide the following clinical metrics to proceed: {', '.join(missing_inputs)}."
+            state["output_message"] = (
+                f"Please provide the following clinical metrics to proceed: "
+                f"{', '.join(missing_inputs)}."
+            )
         else:
-            # 4. Simulate Node 2: Data Processing Node
-            # Fetch context using Hybrid RAG
-            context, selected_chunks, rejected = await self.rag_engine.retrieve_context(config_id, user_query)
+            # 4. Node 2: Data Processing — Hybrid RAG context retrieval
+            context, selected_chunks, rejected = await self._rag_engine.retrieve_context(
+                config_id, user_query,
+            )
             state["retrieved_context"] = context
             state["current_node"] = "processing"
 
-            # Check for classification score based on highest score from selected chunks
-            top_score = selected_chunks[0]["combined_score"] if selected_chunks else 0.0
+            # Get classification score from top chunk
+            top_score = (
+                selected_chunks[0]["combined_score"] if selected_chunks else 0.0
+            )
             state["classification_score"] = top_score
 
-            # Safety escalation circuit breaker: check for clinical red flags or low confidence
-            is_anomaly = False
+            # 5. Node 3: Run all injected safety rules
             anomaly_reasons = []
+            for rule in self._safety_rules:
+                is_anomaly, reason = rule.evaluate(
+                    state["gathered_data"], top_score,
+                )
+                if is_anomaly:
+                    anomaly_reasons.append(reason)
 
-            # Red flag 1: Extreme Fever
-            if "temperature" in state["gathered_data"] and state["gathered_data"]["temperature"] >= 103.0:
-                is_anomaly = True
-                anomaly_reasons.append("Extreme fever detected (>=103.0°F)")
-
-            # Red flag 2: Chest pain / tightness
-            if state["gathered_data"].get("chest_pain", False):
-                is_anomaly = True
-                anomaly_reasons.append("Potential cardiac symptom (chest pain) reported")
-
-            # Red flag 3: Zero-trust classification score below confidence gate
-            if top_score < 0.85:
-                is_anomaly = True
-                anomaly_reasons.append(f"Retrieval confidence ({top_score:.2f}) dropped below zero-trust gate (0.85)")
-
-            if is_anomaly:
-                # 5. Simulate Node 3: Human Intercept Node
+            if anomaly_reasons:
+                # Human Intercept — freeze thread
                 state["current_node"] = "human_intercept"
                 state["requires_review"] = True
                 state["is_paused"] = True
                 state["output_message"] = (
                     f"CRITICAL ESCALATION TRIGGERED: {'; '.join(anomaly_reasons)}. "
-                    "Auto-pilot halted. Your session has been frozen and routed to an expert physician for intercept."
+                    "Auto-pilot halted. Your session has been frozen and routed "
+                    "to an expert physician for intercept."
                 )
             else:
-                # 6. Simulate Node 4: Action/Skills Dispatcher Node
+                # 6. Node 4: Action Dispatch
                 state["current_node"] = "action_dispatch"
-                # Formulate clinical summary based on retrieved guidelines
                 summary = "Clinical parameters verified against guidelines.\n"
                 if selected_chunks:
                     summary += f"Guideline Recommendation: {selected_chunks[0]['content']}"
                 state["output_message"] = summary
 
-        # 7. Write Telemetry trace to Execution Telemetry Ledger
-        chunk_ids = [UUID(c["chunk_id"]) for c in selected_chunks] if 'selected_chunks' in locals() else []
-        await self.db.create_execution_trace(
-            session_id, state["current_node"], user_query, 
-            state["output_message"], chunk_ids, state["classification_score"]
+        # 7. Write telemetry trace
+        chunk_ids = [UUID(c["chunk_id"]) for c in selected_chunks]
+        await self._session_repo.create_execution_trace(
+            session_id, state["current_node"], user_query,
+            state["output_message"], chunk_ids, state["classification_score"],
         )
 
-        # 8. Save updated session state
-        await self.db.save_active_session(
-            session_id, UUID(state["conversation_id"]), config_id, 
-            state["current_node"], state, state["is_paused"], state["requires_review"]
+        # 8. Save updated session checkpoint
+        await self._session_repo.save_active_session(
+            session_id, UUID(state["conversation_id"]), config_id,
+            state["current_node"], state,
+            state["is_paused"], state["requires_review"],
         )
 
         return state

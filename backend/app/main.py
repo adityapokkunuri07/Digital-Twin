@@ -1,12 +1,24 @@
+"""
+FastAPI Application Entry Point.
+
+Assembles the application, registers middleware, and mounts route modules.
+The ServiceProvider is initialized at startup to create all singletons.
+"""
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from backend.app.core.config import settings
-from backend.app.api.endpoints import router as api_router
 from backend.app.core.middleware import PIISanitizationMiddleware
+from backend.app.api.dependencies import provider
+
+# Route modules
+from backend.app.api.routes.config_routes import router as config_router
+from backend.app.api.routes.session_routes import router as session_router
+from backend.app.api.routes.onboarding_routes import router as onboarding_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
 )
 
 # CORS configuration
@@ -21,8 +33,17 @@ app.add_middleware(
 # Zero-Trust PII Sanitization Middleware
 app.add_middleware(PIISanitizationMiddleware)
 
-# Register routes
-app.include_router(api_router, prefix=settings.API_V1_STR)
+# Register domain-specific route modules
+app.include_router(config_router, prefix=settings.API_V1_STR)
+app.include_router(session_router, prefix=settings.API_V1_STR)
+app.include_router(onboarding_router, prefix=settings.API_V1_STR)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize the DI container singletons at application startup."""
+    provider.initialize()
+
 
 @app.get("/")
 def read_root():
