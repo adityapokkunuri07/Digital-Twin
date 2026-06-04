@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Activity, Layers, UserCheck, FileText, FolderOpen, Send, 
   ShieldAlert, RefreshCw, CheckCircle2, AlertTriangle,
   Play, RotateCcw, Sparkles, Search, Eye, Trash2,
-  ChevronDown, ChevronRight, Folder, File
+  ChevronDown, ChevronRight, Folder, File,
+  ZoomIn, ZoomOut, Maximize2
 } from 'lucide-react';
 
 const API_BASE = "http://localhost:8000/api";
@@ -123,6 +124,252 @@ const FileTreeNode = ({ node, level, selectedFile, onSelect, onUnlearnSelect }) 
   );
 };
 
+// ═══════════════════════════════════════════════════════════════
+// Graphical Tree View — Obsidian Mapping visual node graph
+// ═══════════════════════════════════════════════════════════════
+
+const NODE_WIDTH = 200;
+const NODE_HEIGHT = 42;
+const LEVEL_GAP = 110;
+const SIBLING_GAP = 40;
+
+// Curated color palette — one per depth layer (cycles if deeper)
+const LAYER_COLORS = [
+  { bg: 'rgba(191, 90, 242, 0.22)', border: 'rgba(191, 90, 242, 0.5)',  accent: '#BF5AF2', edge: 'rgba(191, 90, 242, 0.35)' },  // Purple  — L0
+  { bg: 'rgba(10, 132, 255, 0.18)', border: 'rgba(10, 132, 255, 0.45)', accent: '#0A84FF', edge: 'rgba(10, 132, 255, 0.30)' },  // Blue    — L1
+  { bg: 'rgba(50, 215, 75, 0.15)',  border: 'rgba(50, 215, 75, 0.40)',  accent: '#32D74B', edge: 'rgba(50, 215, 75, 0.28)' },   // Green   — L2
+  { bg: 'rgba(255, 159, 10, 0.16)', border: 'rgba(255, 159, 10, 0.42)', accent: '#FF9F0A', edge: 'rgba(255, 159, 10, 0.30)' },  // Orange  — L3
+  { bg: 'rgba(255, 55, 95, 0.15)',  border: 'rgba(255, 55, 95, 0.40)',  accent: '#FF375F', edge: 'rgba(255, 55, 95, 0.28)' },   // Pink    — L4
+  { bg: 'rgba(90, 200, 250, 0.15)', border: 'rgba(90, 200, 250, 0.40)', accent: '#5AC8FA', edge: 'rgba(90, 200, 250, 0.28)' },  // Cyan    — L5
+];
+
+const getLayerColor = (depth) => LAYER_COLORS[depth % LAYER_COLORS.length];
+
+/**
+ * Recursively compute layout positions for each node in the tree.
+ * Returns a flat array of { node, x, y, parentX, parentY, depth } for rendering.
+ */
+const computeTreeLayout = (nodes) => {
+  const positioned = [];
+
+  // Measure subtree widths first (recursive)
+  const measureWidth = (node) => {
+    if (!node.children || node.children.length === 0) {
+      node._width = NODE_WIDTH;
+      return NODE_WIDTH;
+    }
+    let totalChildWidth = 0;
+    node.children.forEach(child => {
+      totalChildWidth += measureWidth(child);
+    });
+    totalChildWidth += (node.children.length - 1) * SIBLING_GAP;
+    node._width = Math.max(NODE_WIDTH, totalChildWidth);
+    return node._width;
+  };
+
+  // Position nodes recursively — now tracks depth
+  const positionNode = (node, x, y, parentX, parentY, depth) => {
+    positioned.push({ node, x, y, parentX, parentY, depth });
+
+    if (node.children && node.children.length > 0) {
+      const childY = y + NODE_HEIGHT + LEVEL_GAP;
+      let startX = x - node._width / 2;
+
+      node.children.forEach(child => {
+        const childCenterX = startX + child._width / 2;
+        positionNode(child, childCenterX, childY, x, y + NODE_HEIGHT / 2, depth + 1);
+        startX += child._width + SIBLING_GAP;
+      });
+    }
+  };
+
+  // Create a synthetic root if there are multiple top-level nodes
+  if (nodes.length === 0) return { positioned: [], totalWidth: 0, totalHeight: 0 };
+
+  let rootNode;
+  if (nodes.length === 1) {
+    rootNode = nodes[0];
+  } else {
+    rootNode = { name: 'Vault', isFolder: true, children: nodes, _syntheticRoot: true };
+  }
+
+  measureWidth(rootNode);
+  const totalWidth = rootNode._width + 80; // padding
+  positionNode(rootNode, totalWidth / 2, 20, null, null, 0);
+
+  // Calculate total height
+  let maxY = 0;
+  positioned.forEach(p => { if (p.y > maxY) maxY = p.y; });
+  const totalHeight = maxY + NODE_HEIGHT + 60;
+
+  return { positioned, totalWidth, totalHeight };
+};
+
+const ZOOM_MIN = 0.3;
+const ZOOM_MAX = 1.5;
+const ZOOM_STEP = 0.15;
+
+const GraphicalTreeView = ({ files, selectedFile, onSelect, onUnlearnSelect }) => {
+  const [zoom, setZoom] = useState(0.75);
+  const containerRef = useRef(null);
+  const treeData = buildFileTree(files);
+  const { positioned, totalWidth, totalHeight } = computeTreeLayout(treeData);
+
+  const handleZoomIn = useCallback(() => setZoom(z => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2))), []);
+  const handleZoomOut = useCallback(() => setZoom(z => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2))), []);
+  const handleFitToView = useCallback(() => {
+    if (!containerRef.current || totalWidth === 0) return;
+    const container = containerRef.current;
+    const scaleX = (container.clientWidth - 32) / totalWidth;
+    const scaleY = (container.clientHeight - 32) / totalHeight;
+    const fitScale = Math.min(scaleX, scaleY, 1.0);
+    setZoom(Math.max(ZOOM_MIN, +(fitScale).toFixed(2)));
+  }, [totalWidth, totalHeight]);
+
+  // Mouse wheel zoom
+  const handleWheel = useCallback((e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+      setZoom(z => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, +(z + delta).toFixed(2))));
+    }
+  }, []);
+
+  if (files.length === 0) {
+    return (
+      <div style={{ 
+        color: 'var(--text-muted)', padding: '60px 20px', textAlign: 'center', fontSize: '13px',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', height: '100%', justifyContent: 'center'
+      }}>
+        <FolderOpen size={32} style={{ opacity: 0.3 }} />
+        No sync triggers recorded. Save configs, finalize onboarding, or ingest documents.
+      </div>
+    );
+  }
+
+  const scaledWidth = totalWidth * zoom;
+  const scaledHeight = totalHeight * zoom;
+
+  return (
+    <div style={{ position: 'relative', height: '600px' }}>
+      {/* Zoom Controls */}
+      <div className="graph-zoom-controls">
+        <button className="graph-zoom-btn" onClick={handleZoomIn} title="Zoom In">
+          <ZoomIn size={16} />
+        </button>
+        <span className="graph-zoom-label">{Math.round(zoom * 100)}%</span>
+        <button className="graph-zoom-btn" onClick={handleZoomOut} title="Zoom Out">
+          <ZoomOut size={16} />
+        </button>
+        <div className="graph-zoom-divider" />
+        <button className="graph-zoom-btn" onClick={handleFitToView} title="Fit to View">
+          <Maximize2 size={16} />
+        </button>
+      </div>
+
+      {/* Scrollable container */}
+      <div
+        ref={containerRef}
+        className="graph-tree-container"
+        style={{ height: '100%' }}
+        onWheel={handleWheel}
+      >
+        <div
+          className="graph-tree-canvas"
+          style={{
+            width: scaledWidth + 'px',
+            height: scaledHeight + 'px',
+            minWidth: scaledWidth > 0 ? scaledWidth + 'px' : '100%',
+          }}
+        >
+          {/* Scaled inner layer */}
+          <div style={{
+            width: totalWidth + 'px',
+            height: totalHeight + 'px',
+            transform: `scale(${zoom})`,
+            transformOrigin: 'top left',
+          }}>
+            {/* SVG Edges — colored per child depth */}
+            <svg className="graph-tree-edges" width={totalWidth} height={totalHeight}>
+              {positioned.map((p, i) => {
+                if (p.parentX === null) return null;
+                const layerColor = getLayerColor(p.depth);
+                const x1 = p.parentX;
+                const y1 = p.parentY + NODE_HEIGHT / 2 + 4;
+                const x2 = p.x;
+                const y2 = p.y - 2;
+                const midY = (y1 + y2) / 2;
+                return (
+                  <path
+                    key={`edge-${i}`}
+                    d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
+                    style={{ stroke: layerColor.edge, strokeWidth: 2 }}
+                  />
+                );
+              })}
+            </svg>
+
+            {/* Nodes — colored per depth layer */}
+            {positioned.map((p, i) => {
+              const { node, x, y, depth } = p;
+              const layerColor = getLayerColor(depth);
+              const isFolder = node.isFolder && !node._syntheticRoot;
+              const isRoot = i === 0;
+              const isFile = node.isFile;
+              const fileData = node.fileData;
+              const isSelected = isFile && selectedFile && selectedFile.path === fileData?.path;
+              const isQuarantined = isFile && fileData?.quarantine_status;
+
+              let className = 'graph-node';
+              if (isSelected) className += ' graph-node--selected';
+              if (isQuarantined) className += ' graph-node--quarantined';
+
+              const handleClick = () => {
+                if (isFile && fileData) {
+                  onSelect(fileData);
+                  if (fileData.node_id) onUnlearnSelect(fileData.node_id);
+                }
+              };
+
+              const nodeStyle = {
+                left: x + 'px',
+                top: y + 'px',
+                background: isQuarantined ? 'rgba(255, 69, 58, 0.08)' : layerColor.bg,
+                borderColor: isSelected ? 'var(--primary)' : (isQuarantined ? 'rgba(255, 69, 58, 0.4)' : layerColor.border),
+                borderStyle: isFolder && !isRoot ? 'dashed' : 'solid',
+              };
+
+              const iconColor = isQuarantined ? 'var(--error)' : layerColor.accent;
+
+              return (
+                <div
+                  key={i}
+                  className={className}
+                  style={nodeStyle}
+                  onClick={handleClick}
+                  title={isFile ? fileData?.path : node.name}
+                >
+                  {isFolder || isRoot ? (
+                    <Folder size={16} style={{ color: iconColor, flexShrink: 0 }} />
+                  ) : (
+                    <File size={16} style={{ color: iconColor, flexShrink: 0 }} />
+                  )}
+                  <span className="graph-node__label" style={{ color: layerColor.accent }}>{node.name}</span>
+                  {isFile && fileData?.type && (
+                    <span className="graph-node__badge" style={{ background: layerColor.bg, color: layerColor.accent, borderColor: layerColor.border }}>
+                      {fileData.type}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const buildChunkTree = (chunks) => {
   const root = { name: 'root', children: [], isFolder: true };
   
@@ -221,44 +468,94 @@ const ChunkTreeNode = ({ node, level }) => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('workflow');
+  // --- localStorage helpers ---
+  const loadState = (key, fallback) => {
+    try {
+      const saved = localStorage.getItem(`dt_${key}`);
+      return saved !== null ? JSON.parse(saved) : fallback;
+    } catch { return fallback; }
+  };
+  const saveState = (key, value) => {
+    try { localStorage.setItem(`dt_${key}`, JSON.stringify(value)); } catch {}
+  };
+
+  const [activeTab, setActiveTab] = useState(() => {
+    // 1. First check URL path
+    const path = window.location.pathname.replace('/', '').toLowerCase();
+    const routeMap = {
+      'workflow': 'workflow',
+      'onboarding': 'onboarding',
+      'rag-ingestion': 'rag',
+      'obsidian-mapping': 'obsidian'
+    };
+    if (routeMap[path]) return routeMap[path];
+    
+    // 2. Fallback to localStorage or default
+    return loadState('activeTab', 'workflow');
+  });
+
+  // Sync activeTab to URL and localStorage
+  useEffect(() => {
+    const tabToRoute = {
+      'workflow': 'workflow',
+      'onboarding': 'onboarding',
+      'rag': 'rag-ingestion',
+      'obsidian': 'obsidian-mapping'
+    };
+    const newPath = `/${tabToRoute[activeTab] || 'workflow'}`;
+    if (window.location.pathname !== newPath) {
+      window.history.pushState({ tab: activeTab }, '', newPath);
+    }
+    saveState('activeTab', activeTab);
+  }, [activeTab]);
+
+  // Handle browser back/forward buttons
+  useEffect(() => {
+    const handlePopState = (e) => {
+      if (e.state && e.state.tab) {
+        setActiveTab(e.state.tab);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
   
   // --- Global State ---
-  const [configId, setConfigId] = useState('11111111-1111-1111-1111-111111111111'); // Matches sample_data.sql
-  const [activeVersion, setActiveVersion] = useState('1.0.0');
-  const [isFeasible, setIsFeasible] = useState(true);
-  const [validationErrors, setValidationErrors] = useState([]);
-  const [apiStatus, setApiStatus] = useState('offline'); // online / offline
+  const [configId, setConfigId] = useState(() => loadState('configId', '11111111-1111-1111-1111-111111111111'));
+  const [activeVersion, setActiveVersion] = useState(() => loadState('activeVersion', '1.0.0'));
+  const [isFeasible, setIsFeasible] = useState(() => loadState('isFeasible', true));
+  const [validationErrors, setValidationErrors] = useState(() => loadState('validationErrors', []));
+  const [apiStatus, setApiStatus] = useState('offline'); // always re-probe on load
 
   // --- Workflow Configurator State ---
-  const [steps, setSteps] = useState([
+  const [steps, setSteps] = useState(() => loadState('steps', [
     { id: "step_1", name: "Intake", inputs: [], outputs: ["symptoms", "temperature"], dependencies: [] },
     { id: "step_2", name: "Diagnosis Gate", inputs: ["symptoms", "temperature"], outputs: ["is_severe", "diagnosis_summary"], dependencies: ["step_1"] },
     { id: "step_3", name: "Action Escalator", inputs: ["is_severe", "diagnosis_summary"], outputs: ["escalation_done"], dependencies: ["step_2"] }
-  ]);
-  const [autopilot, setAutopilot] = useState(true);
+  ]));
+  const [autopilot, setAutopilot] = useState(() => loadState('autopilot', true));
   const [newStep, setNewStep] = useState({ name: '', inputs: '', outputs: '', dependencies: '' });
 
   // --- Onboarding Journalist State ---
-  const [transcript, setTranscript] = useState(
+  const [transcript, setTranscript] = useState(() => loadState('transcript',
     "Dr. Sterling: Initial intake gathers vitals including blood pressure and temperature. " +
     "Then, we evaluate if patient complains of chest tightness. " +
     "If temperature is >= 103, we escalate to emergency. " +
     "Action plans involve scheduling immediate checkups or dispatching medical alerts."
-  );
-  const [saturationScore, setSaturationScore] = useState(0.45);
-  const [isSaturationSatisfied, setIsSaturationSatisfied] = useState(false);
-  const [nextPrompt, setNextPrompt] = useState("Explain how you evaluate blood pressure limits?");
-  const [chatLog, setChatLog] = useState([
+  ));
+  const [saturationScore, setSaturationScore] = useState(() => loadState('saturationScore', 0.45));
+  const [isSaturationSatisfied, setIsSaturationSatisfied] = useState(() => loadState('isSaturationSatisfied', false));
+  const [nextPrompt, setNextPrompt] = useState(() => loadState('nextPrompt', "Explain how you evaluate blood pressure limits?"));
+  const [chatLog, setChatLog] = useState(() => loadState('chatLog', [
     { sender: 'journalist', text: "Welcome Dr. Sterling. Please explain your standard clinical intake routine?" },
     { sender: 'expert', text: "Dr. Sterling: Initial intake gathers vitals including blood pressure and temperature. Then, we evaluate if patient complains of chest tightness." }
-  ]);
+  ]));
   const [chatInput, setChatInput] = useState('');
-  const [cotNodes, setCotNodes] = useState([]);
-  const [cotEdges, setCotEdges] = useState([]);
+  const [cotNodes, setCotNodes] = useState(() => loadState('cotNodes', []));
+  const [cotEdges, setCotEdges] = useState(() => loadState('cotEdges', []));
 
   // --- Ingestion State ---
-  const [rawText, setRawText] = useState(
+  const [rawText, setRawText] = useState(() => loadState('rawText',
     "# Clinical Triage Guidelines\n\n" +
     "This document covers the cardiac intake and evaluation procedures.\n\n" +
     "## Intake Protocol\n\n" +
@@ -267,22 +564,55 @@ export default function App() {
     "Assess results. If temperature exceeds 103, trigger emergency alarms. If chest pain is checked, halt immediately.\n\n" +
     "## Treatment Action\n\n" +
     "Escalate critical cases to physicians or schedule routine followups."
-  );
-  const [ingestedChunks, setIngestedChunks] = useState([]);
+  ));
+  const [ingestedChunks, setIngestedChunks] = useState(() => loadState('ingestedChunks', []));
   const [ingesting, setIngesting] = useState(false);
 
   // --- Obsidian & Unlearning State ---
-  const [obsidianFiles, setObsidianFiles] = useState([]);
-  const [selectedObsidianFile, setSelectedObsidianFile] = useState(null);
-  const [unlearnNodeInput, setUnlearnNodeInput] = useState('');
-  const [unlearnRationale, setUnlearnRationale] = useState('Guidelines changed due to updated AHA recommendations.');
+  const [obsidianFiles, setObsidianFiles] = useState(() => loadState('obsidianFiles', []));
+  const [selectedObsidianFile, setSelectedObsidianFile] = useState(() => loadState('selectedObsidianFile', null));
+  const [unlearnNodeInput, setUnlearnNodeInput] = useState(() => loadState('unlearnNodeInput', ''));
+  const [unlearnRationale, setUnlearnRationale] = useState(() => loadState('unlearnRationale', 'Guidelines changed due to updated AHA recommendations.'));
+  const [unlearnStep, setUnlearnStep] = useState(0); // 0 = default, 1 = confirm 1, 2 = confirm 2, 3 = confirm 3
+  const [unlearnTargetNode, setUnlearnTargetNode] = useState(null);
 
   // --- Query Sandbox State ---
-  const [sessionId, setSessionId] = useState(null);
-  const [userQuery, setUserQuery] = useState("My temperature is 104 and my chest feels tight");
-  const [sandboxLog, setSandboxLog] = useState([]);
-  const [activeSessionState, setActiveSessionState] = useState(null);
+  const [sessionId, setSessionId] = useState(() => loadState('sessionId', null));
+  const [userQuery, setUserQuery] = useState(() => loadState('userQuery', "My temperature is 104 and my chest feels tight"));
+  const [sandboxLog, setSandboxLog] = useState(() => loadState('sandboxLog', []));
+  const [activeSessionState, setActiveSessionState] = useState(() => loadState('activeSessionState', null));
   const [loadingSandbox, setLoadingSandbox] = useState(false);
+
+  // --- Persist state to localStorage on change ---
+  useEffect(() => {
+    saveState('activeTab', activeTab);
+    saveState('configId', configId);
+    saveState('activeVersion', activeVersion);
+    saveState('isFeasible', isFeasible);
+    saveState('validationErrors', validationErrors);
+    saveState('steps', steps);
+    saveState('autopilot', autopilot);
+    saveState('transcript', transcript);
+    saveState('saturationScore', saturationScore);
+    saveState('isSaturationSatisfied', isSaturationSatisfied);
+    saveState('nextPrompt', nextPrompt);
+    saveState('chatLog', chatLog);
+    saveState('cotNodes', cotNodes);
+    saveState('cotEdges', cotEdges);
+    saveState('rawText', rawText);
+    saveState('ingestedChunks', ingestedChunks);
+    saveState('obsidianFiles', obsidianFiles);
+    saveState('selectedObsidianFile', selectedObsidianFile);
+    saveState('unlearnNodeInput', unlearnNodeInput);
+    saveState('unlearnRationale', unlearnRationale);
+    saveState('sessionId', sessionId);
+    saveState('userQuery', userQuery);
+    saveState('sandboxLog', sandboxLog);
+    saveState('activeSessionState', activeSessionState);
+  }, [activeTab, configId, activeVersion, isFeasible, validationErrors, steps, autopilot,
+      transcript, saturationScore, isSaturationSatisfied, nextPrompt, chatLog, cotNodes, cotEdges,
+      rawText, ingestedChunks, obsidianFiles, selectedObsidianFile, unlearnNodeInput, unlearnRationale,
+      sessionId, userQuery, sandboxLog, activeSessionState]);
 
   // --- Probe Backend Status on Load ---
   useEffect(() => {
@@ -604,23 +934,45 @@ export default function App() {
     }
   };
 
-  const handleUnlearn = async () => {
+  const handleStartUnlearn = () => {
     if (!unlearnNodeInput.trim()) return;
+    const targetNode = obsidianFiles.find(f => f.node_id === unlearnNodeInput || f.path.includes(unlearnNodeInput));
+    if (!targetNode) {
+      setUnlearnStep(-1); // -1 for error
+      return;
+    }
+    setUnlearnTargetNode(targetNode);
+    setUnlearnStep(1);
+  };
+
+  const handleConfirmStep = () => {
+    if (unlearnStep < 3) {
+      setUnlearnStep(prev => prev + 1);
+    } else {
+      executeUnlearn();
+    }
+  };
+
+  const handleCancelUnlearn = () => {
+    setUnlearnStep(0);
+    setUnlearnTargetNode(null);
+  };
+
+  const executeUnlearn = async () => {
     const payload = {
       node_ids: [unlearnNodeInput],
       rationale: unlearnRationale
     };
     
     const updateLocalState = () => {
-      setObsidianFiles(prev => prev.map(f => {
-        if (f.node_id === unlearnNodeInput || f.path.includes(unlearnNodeInput)) {
-          return { ...f, quarantine_status: true, unlearning_rationale: unlearnRationale };
-        }
-        return f;
-      }));
+      // Completely remove the node from the graphical tree dynamically
+      setObsidianFiles(prev => prev.filter(f => f.node_id !== unlearnNodeInput && !f.path.includes(unlearnNodeInput)));
       if (selectedObsidianFile && (selectedObsidianFile.node_id === unlearnNodeInput || selectedObsidianFile.path.includes(unlearnNodeInput))) {
-        setSelectedObsidianFile(prev => ({ ...prev, quarantine_status: true, unlearning_rationale: unlearnRationale }));
+        setSelectedObsidianFile(null);
       }
+      setUnlearnNodeInput('');
+      setUnlearnStep(4); // 4 for success
+      setTimeout(() => setUnlearnStep(0), 3000);
     };
 
     if (apiStatus === 'online') {
@@ -632,15 +984,14 @@ export default function App() {
         });
         await res.json();
         updateLocalState();
-        alert("Mom-and-Child Unlearning complete. Vector tombstoned!");
-        return;
       } catch (err) {
         console.error(err);
+        setUnlearnStep(-2); // -2 for backend error
+        setTimeout(() => setUnlearnStep(0), 3000);
       }
+    } else {
+      updateLocalState();
     }
-
-    updateLocalState();
-    alert(`[MOCK UNLEARNING] Node ${unlearnNodeInput} tombstoned successfully. Embedding set to NULL!`);
   };
 
   // --- Runtime Query sandbox ---
@@ -1124,101 +1475,154 @@ ${file.content || ''}
 
         {/* OBSIDIAN AUDIT MAPPING TAB */}
         {activeTab === 'obsidian' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '250px 1fr 340px', gap: '24px' }}>
-            {/* File Explorer */}
-            <div className="glass-card" style={{ maxHeight: '600px', overflowY: 'auto' }}>
-              <h3 style={{ fontSize: '18px', marginBottom: '16px' }}>Vault Files</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {obsidianFiles.length === 0 ? (
-                  <div style={{ color: 'var(--text-muted)', padding: '20px 0', textAlign: 'center', fontSize: '12px' }}>
-                    No sync triggers recorded. Save configs or finalize onboarding.
-                  </div>
-                ) : (
-                  buildFileTree(obsidianFiles).map((node, i) => (
-                    <FileTreeNode 
-                      key={i} 
-                      node={node} 
-                      level={0}
-                      selectedFile={selectedObsidianFile}
-                      onSelect={(file) => setSelectedObsidianFile(file)}
-                      onUnlearnSelect={(id) => setUnlearnNodeInput(id)}
-                    />
-                  ))
-                )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', gap: '24px' }}>
+            {/* Graphical Tree View */}
+            <div className="glass-card" style={{ padding: '0', overflow: 'hidden' }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Sparkles size={18} style={{ color: 'var(--secondary)' }} />
+                <h3 style={{ fontSize: '16px', margin: 0, fontWeight: 600 }}>Knowledge Graph</h3>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                  {obsidianFiles.length} node{obsidianFiles.length !== 1 ? 's' : ''}
+                </span>
               </div>
+              <GraphicalTreeView
+                files={obsidianFiles}
+                selectedFile={selectedObsidianFile}
+                onSelect={(file) => setSelectedObsidianFile(file)}
+                onUnlearnSelect={(id) => setUnlearnNodeInput(id)}
+              />
             </div>
 
-            {/* Markdown Viewer */}
-            <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', padding: '0', overflow: 'hidden', height: '600px' }}>
-              <div style={{ padding: '16px', borderBottom: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.2)' }}>
-                <h3 style={{ fontSize: '16px', margin: 0, fontFamily: 'monospace' }}>
-                  {selectedObsidianFile ? selectedObsidianFile.path : 'Select a file'}
-                </h3>
+            {/* Right Column: Markdown Preview + Retract Knowledge stacked */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {/* Markdown Viewer */}
+              <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', padding: '0', overflow: 'hidden', flex: 1, minHeight: '320px' }}>
+                <div style={{ padding: '16px', borderBottom: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.2)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Eye size={16} style={{ color: 'var(--primary)' }} />
+                  <h3 style={{ fontSize: '14px', margin: 0, fontFamily: 'monospace' }}>
+                    {selectedObsidianFile ? selectedObsidianFile.path : 'Select a node'}
+                  </h3>
+                </div>
+                <div style={{ 
+                  flex: 1, 
+                  padding: '20px', 
+                  overflowY: 'auto', 
+                  fontFamily: 'monospace', 
+                  fontSize: '13px', 
+                  lineHeight: '1.6',
+                  background: selectedObsidianFile?.quarantine_status ? 'rgba(255,50,50,0.02)' : 'transparent'
+                }}>
+                  {selectedObsidianFile ? (
+                    <pre style={{ whiteSpace: 'pre-wrap', margin: 0, wordWrap: 'break-word' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>
+                        {(() => {
+                          const md = generateMarkdown(selectedObsidianFile);
+                          const parts = md.split('\n---');
+                          return parts[0] + '\n---';
+                        })()}
+                      </span>
+                      <span style={{ color: 'var(--text-primary)' }}>
+                        {(() => {
+                          const md = generateMarkdown(selectedObsidianFile);
+                          const parts = md.split('\n---');
+                          return parts.slice(1).join('\n---');
+                        })()}
+                      </span>
+                    </pre>
+                  ) : (
+                    <div style={{ color: 'var(--text-muted)', display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: '13px' }}>
+                      Click a node in the Knowledge Graph to view its projected SSOT state.
+                    </div>
+                  )}
+                </div>
               </div>
-              <div style={{ 
-                flex: 1, 
-                padding: '20px', 
-                overflowY: 'auto', 
-                fontFamily: 'monospace', 
-                fontSize: '13px', 
-                lineHeight: '1.6',
-                background: selectedObsidianFile?.quarantine_status ? 'rgba(255,50,50,0.02)' : 'transparent'
-              }}>
-                {selectedObsidianFile ? (
-                  <pre style={{ whiteSpace: 'pre-wrap', margin: 0, wordWrap: 'break-word' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>
-                      {(() => {
-                        const md = generateMarkdown(selectedObsidianFile);
-                        const parts = md.split('\n---');
-                        return parts[0] + '\n---';
-                      })()}
-                    </span>
-                    <span style={{ color: 'var(--text-primary)' }}>
-                      {(() => {
-                        const md = generateMarkdown(selectedObsidianFile);
-                        const parts = md.split('\n---');
-                        return parts.slice(1).join('\n---');
-                      })()}
-                    </span>
-                  </pre>
-                ) : (
-                  <div style={{ color: 'var(--text-muted)', display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
-                    Select a Markdown file from the explorer to view the projected SSOT state.
+
+              {/* Mom-Child Unlearning panel */}
+              <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <h3 style={{ fontSize: '18px', color: 'var(--error)' }}>Retract Knowledge</h3>
+                
+                {unlearnStep === 0 && (
+                  <>
+                    <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                      Mom-and-Child Unlearning Protocol: Nullifies embedding vector in the SSOT database to disable semantic retrieve paths, while keeping YAML audit logs intact.
+                    </p>
+                    <div className="input-group">
+                      <span className="input-label">Target Node ID</span>
+                      <input 
+                        className="form-input" 
+                        placeholder="UUID" 
+                        value={unlearnNodeInput}
+                        onChange={e => setUnlearnNodeInput(e.target.value)}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <span className="input-label">Retraction Rationale</span>
+                      <textarea 
+                        className="form-input" 
+                        style={{ minHeight: '80px' }}
+                        value={unlearnRationale}
+                        onChange={e => setUnlearnRationale(e.target.value)}
+                      />
+                    </div>
+                    <button className="btn btn-primary" style={{ backgroundColor: 'var(--error)' }} onClick={handleStartUnlearn}>
+                      Retract Node
+                    </button>
+                  </>
+                )}
+
+                {unlearnStep === -1 && (
+                  <>
+                    <p style={{ color: 'var(--error)' }}>Node not found in current graph. Please select a valid node.</p>
+                    <button className="btn btn-secondary" onClick={handleCancelUnlearn}>Try Again</button>
+                  </>
+                )}
+
+                {unlearnStep === -2 && (
+                  <>
+                    <p style={{ color: 'var(--error)' }}>Failed to connect to backend for unlearning.</p>
+                    <button className="btn btn-secondary" onClick={handleCancelUnlearn}>Dismiss</button>
+                  </>
+                )}
+
+                {unlearnStep === 4 && (
+                  <>
+                    <p style={{ color: 'var(--success)' }}>✔ Mom-and-Child Unlearning complete. Vector tombstoned and node removed from graph!</p>
+                  </>
+                )}
+
+                {unlearnStep > 0 && unlearnStep < 4 && (
+                  <div style={{ background: 'rgba(255,50,50,0.1)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,50,50,0.2)' }}>
+                    <h4 style={{ color: 'var(--error)', marginBottom: '12px' }}>Confirmation Step {unlearnStep} of 3</h4>
+                    
+                    {unlearnStep === 1 && (
+                      <p style={{ fontSize: '14px', marginBottom: '16px' }}>
+                        Are you sure you want to retract this node? This action will remove it from the knowledge graph.
+                      </p>
+                    )}
+                    
+                    {unlearnStep === 2 && (
+                      <p style={{ fontSize: '14px', marginBottom: '16px' }}>
+                        WARNING: This node belongs to the <strong>'{unlearnTargetNode?.parent_path || 'Root'}'</strong> sub-tree. Retracting it may impact dependent knowledge pathways. Proceed?
+                      </p>
+                    )}
+                    
+                    {unlearnStep === 3 && (
+                      <p style={{ fontSize: '14px', marginBottom: '16px', fontWeight: 'bold' }}>
+                        FINAL CONFIRMATION: Are you absolutely certain you want to permanently tombstone this node's vector embedding?
+                      </p>
+                    )}
+
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                      <button className="btn btn-primary" style={{ backgroundColor: 'var(--error)', flex: 1 }} onClick={handleConfirmStep}>
+                        {unlearnStep === 3 ? "Yes, Tombstone Vector" : "Yes, Proceed"}
+                      </button>
+                      <button className="btn btn-secondary" style={{ flex: 1 }} onClick={handleCancelUnlearn}>
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
-            </div>
-
-            {/* Mom-Child Unlearning panel */}
-            <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '600px' }}>
-              <h3 style={{ fontSize: '18px', color: 'var(--error)' }}>Retract Knowledge</h3>
-              <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                Mom-and-Child Unlearning Protocol: Nullifies embedding vector in the SSOT database to disable semantic retrieve paths, while keeping YAML audit logs intact.
-              </p>
-              
-              <div className="input-group">
-                <span className="input-label">Target Node ID</span>
-                <input 
-                  className="form-input" 
-                  placeholder="UUID" 
-                  value={unlearnNodeInput}
-                  onChange={e => setUnlearnNodeInput(e.target.value)}
-                />
-              </div>
-
-              <div className="input-group">
-                <span className="input-label">Retraction Rationale</span>
-                <textarea 
-                  className="form-input" 
-                  style={{ minHeight: '80px' }}
-                  value={unlearnRationale}
-                  onChange={e => setUnlearnRationale(e.target.value)}
-                />
-              </div>
-
-              <button className="btn btn-primary" style={{ backgroundColor: 'var(--error)' }} onClick={handleUnlearn}>
-                Tombstone Vector
-              </button>
             </div>
           </div>
         )}

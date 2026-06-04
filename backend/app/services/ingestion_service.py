@@ -238,6 +238,7 @@ class StructuralRAGIngestionPipeline:
         # 3. Compile embedding
         emb = self.embedding_service.get_embedding(f"{title} - {content}")
         
+        chunk["chunk_id"] = str(uuid4())
         chunk["tags"] = list(tags)
         chunk["synthetic_questions"] = synthetic_questions
         chunk["embedding"] = emb
