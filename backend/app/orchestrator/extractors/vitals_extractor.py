@@ -23,6 +23,9 @@ class VitalsExtractor(DataExtractor):
     _BP_PATTERN = re.compile(
         r'(?:bp|blood pressure)(?:\s+is|:)?\s*(\d{2,3})[/\s](\d{2,3})'
     )
+    _SINGLE_SYSTOLIC_PATTERN = re.compile(
+        r'(?:blood pressure|bp).*?(?:up to|spike to|to|is|:)?\s*(\d{3})(?!\s*(?:/|\d))'
+    )
 
     def extract(self, text: str) -> Dict[str, Any]:
         extracted: Dict[str, Any] = {}
@@ -35,5 +38,9 @@ class VitalsExtractor(DataExtractor):
         if bp_match:
             extracted["blood_pressure_systolic"] = int(bp_match.group(1))
             extracted["blood_pressure_diastolic"] = int(bp_match.group(2))
+        else:
+            single_systolic_match = self._SINGLE_SYSTOLIC_PATTERN.search(text)
+            if single_systolic_match:
+                extracted["blood_pressure_systolic"] = int(single_systolic_match.group(1))
 
         return extracted
