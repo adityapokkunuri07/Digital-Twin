@@ -15,6 +15,8 @@ from backend.app.api.dependencies import provider
 from backend.app.api.routes.config_routes import router as config_router
 from backend.app.api.routes.session_routes import router as session_router
 from backend.app.api.routes.onboarding_routes import router as onboarding_router
+from backend.app.api.routes.preconsult_routes import router as preconsult_router
+from backend.app.api.routes.auth_routes import router as auth_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -37,6 +39,8 @@ app.add_middleware(PIISanitizationMiddleware)
 app.include_router(config_router, prefix=settings.API_V1_STR)
 app.include_router(session_router, prefix=settings.API_V1_STR)
 app.include_router(onboarding_router, prefix=settings.API_V1_STR)
+app.include_router(preconsult_router, prefix=settings.API_V1_STR)
+app.include_router(auth_router, prefix=settings.API_V1_STR)
 
 
 @app.on_event("startup")

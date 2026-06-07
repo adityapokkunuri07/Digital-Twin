@@ -6,6 +6,7 @@ import {
   ChevronDown, ChevronRight, Folder, File,
   ZoomIn, ZoomOut, Maximize2
 } from 'lucide-react';
+import PreConsultation from './PreConsultation';
 
 const API_BASE = "http://localhost:8000/api";
 const DOCTOR_ID = "4a8f39b6-89d1-4db8-bbbe-d9616e00b8e2";
@@ -486,7 +487,8 @@ export default function App() {
       'workflow': 'workflow',
       'onboarding': 'onboarding',
       'rag-ingestion': 'rag',
-      'obsidian-mapping': 'obsidian'
+      'obsidian-mapping': 'obsidian',
+      'pre-consult': 'pre-consult'
     };
     if (routeMap[path]) return routeMap[path];
     
@@ -500,7 +502,8 @@ export default function App() {
       'workflow': 'workflow',
       'onboarding': 'onboarding',
       'rag': 'rag-ingestion',
-      'obsidian': 'obsidian-mapping'
+      'obsidian': 'obsidian-mapping',
+      'pre-consult': 'pre-consult'
     };
     const newPath = `/${tabToRoute[activeTab] || 'workflow'}`;
     if (window.location.pathname !== newPath) {
@@ -1187,6 +1190,14 @@ ${file.content || ''}
             <FolderOpen size={18} />
             <span>Obsidian Mapping</span>
           </button>
+
+          <button 
+            className={`nav-link w-full ${activeTab === 'pre-consult' ? 'active' : ''}`}
+            onClick={() => setActiveTab('pre-consult')}
+          >
+            <ShieldAlert size={18} />
+            <span>Pre-Consultation</span>
+          </button>
         </nav>
 
         <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center' }}>
@@ -1723,6 +1734,14 @@ ${file.content || ''}
             </div>
           </div>
         </section>
+
+        {/* PRE-CONSULTATION TAB */}
+        {activeTab === 'pre-consult' && (
+          <div style={{ marginTop: '20px' }}>
+            <PreConsultation />
+          </div>
+        )}
+
       </main>
     </div>
   );

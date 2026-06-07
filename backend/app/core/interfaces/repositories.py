@@ -7,6 +7,7 @@ Consumers depend only on the interface they need, not a monolithic 13-method con
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from uuid import UUID
+from datetime import datetime
 
 
 class ConfigRepository(ABC):
@@ -144,4 +145,56 @@ class SessionRepository(ABC):
         classification_score: float,
     ) -> Dict[str, Any]:
         """Write an immutable execution trace to the telemetry ledger."""
+        ...
+
+
+class PreConsultRepository(ABC):
+    """
+    Persistence contract for Pre-Consultation Workflow.
+    """
+
+    @abstractmethod
+    async def create_session(self, patient_id: UUID, config_id: UUID) -> Dict[str, Any]:
+        ...
+
+    @abstractmethod
+    async def get_session(self, session_id: UUID) -> Optional[Dict[str, Any]]:
+        ...
+
+    @abstractmethod
+    async def update_session_state(
+        self, 
+        session_id: UUID, 
+        status: str, 
+        confidence_score: float, 
+        increment_turn: bool = False,
+        current_entities: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        ...
+
+    @abstractmethod
+    async def append_interaction_log(
+        self, 
+        session_id: UUID, 
+        sender_type: str, 
+        message_text: str, 
+        extracted_entities: Dict[str, Any], 
+        turn_index: int
+    ) -> Dict[str, Any]:
+        ...
+
+    @abstractmethod
+    async def atomic_insert_summary_and_update_state(
+        self, 
+        session_id: UUID, 
+        structured_data: Dict[str, Any], 
+        summary_embedding: List[float]
+    ) -> None:
+        """Calls the atomic database RPC to insert the summary and update state safely."""
+        ...
+        
+    @abstractmethod
+    async def create_appointment(
+        self, patient_id: UUID, session_id: UUID, doctor_id: UUID, scheduled_time: datetime
+    ) -> Dict[str, Any]:
         ...

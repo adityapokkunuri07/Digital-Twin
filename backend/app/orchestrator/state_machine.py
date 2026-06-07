@@ -18,6 +18,7 @@ from backend.app.core.interfaces.repositories import ConfigRepository, SessionRe
 from backend.app.services.hybrid_rag_service import HybridRAGEngine
 from backend.app.orchestrator.extractors.base import DataExtractor
 from backend.app.orchestrator.safety_rules.base import SafetyRule
+from backend.app.core.interfaces.embedding import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,13 @@ class ZeroTrustOrchestrator:
         self._rag_engine = rag_engine
         self._extractors = extractors or []
         self._safety_rules = safety_rules or []
+        self._embedding_service: EmbeddingService | None = None
+        self._preconsult_repo = None # Will be injected later if needed for db rpc
+        
+    def set_preconsult_dependencies(self, preconsult_repo, embedding_service):
+        """Inject additional dependencies needed for pre-consultation synthesis."""
+        self._preconsult_repo = preconsult_repo
+        self._embedding_service = embedding_service
 
     async def initialize_session(
         self, conversation_id: UUID, config_id: UUID
@@ -216,3 +224,36 @@ class ZeroTrustOrchestrator:
         )
 
         return state
+
+    async def execute_synthesis_subgraph(self, session_id: UUID, is_partial: bool, reason: str):
+        """
+        Background Task 2: Clinical Synthesis.
+        This represents the background execution of the LangGraph node for synthesis.
+        """
+        logger.info(f"LangGraph executing synthesis subgraph for session {session_id} (Partial: {is_partial})")
+        
+        if not self._preconsult_repo or not self._embedding_service:
+            logger.error("Synthesis dependencies not injected into orchestrator.")
+            return
+
+        try:
+            # 1. Gather all data (in a real LangGraph setup, we'd invoke the LLM with session history)
+            # Here we simulate the LLM output.
+            structured_data = {
+                "chief_complaint": "Sample extracted complaint",
+                "is_partial": is_partial,
+                "reason": reason
+            }
+            
+            # 2. Vectorize the data
+            embedding = self._embedding_service.get_embedding(str(structured_data))
+            
+            # 3. Call the atomic RPC to safely insert and update state
+            await self._preconsult_repo.atomic_insert_summary_and_update_state(
+                session_id=session_id,
+                structured_data=structured_data,
+                summary_embedding=embedding
+            )
+            logger.info(f"LangGraph synthesis complete for session {session_id}.")
+        except Exception as e:
+            logger.error(f"Synthesis subgraph failed for session {session_id}: {e}")
