@@ -35,3 +35,26 @@ async def query_session(
     """Send a user query to an active session for state machine processing."""
     state = await orch.run_step(payload.session_id, payload.query)
     return state
+
+
+from arq import create_pool
+from arq.connections import RedisSettings
+from backend.app.api.schemas.session_schemas import BookAppointmentRequest
+
+async def get_redis_pool():
+    # Points to standard Redis settings
+    return await create_pool(RedisSettings(host="localhost", port=6379))
+
+@router.post("/book", status_code=202)
+async def book_appointment(
+    payload: BookAppointmentRequest,
+    redis_pool = Depends(get_redis_pool)
+):
+    """Enqueues the booking task into the Redis queue for worker execution."""
+    await redis_pool.enqueue_job(
+        "execute_booking_saga_task",
+        session_id=str(payload.session_id),
+        preferred_date=payload.preferred_date,
+        time_slot=payload.time_slot
+    )
+    return {"status": "queued", "session_id": payload.session_id}

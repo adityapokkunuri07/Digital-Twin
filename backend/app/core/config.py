@@ -1,5 +1,6 @@
 import os
-from pydantic import Field
+from typing import Any
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -14,11 +15,18 @@ class Settings(BaseSettings):
     # Gemini API Key
     GEMINI_API_KEY: str = ""
     
-    # Obsidian Vault Export Destination (relative to project root)
-    OBSIDIAN_VAULT_PATH: str = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 
-        "obsidian_vault"
-    )
+    # Path to the Obsidian Vault (Leave empty to use default ./obsidian_vault)
+    OBSIDIAN_VAULT_PATH: str = ""
+
+    @field_validator("OBSIDIAN_VAULT_PATH", mode="before")
+    @classmethod
+    def resolve_vault_path(cls, v: Any) -> str:
+        if not v or not str(v).strip():
+            return os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 
+                "obsidian_vault"
+            )
+        return str(v)
     
     # Embedding Configuration
     EMBEDDING_MODEL_NAME: str = "all-MiniLM-L6-v2"

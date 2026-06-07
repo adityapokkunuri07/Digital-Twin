@@ -15,3 +15,10 @@ class QuerySessionRequest(BaseModel):
     """Request payload for sending a user query to an active session."""
     session_id: UUID
     query: str
+
+
+class BookAppointmentRequest(BaseModel):
+    """Request payload for enqueuing a clinic booking transaction."""
+    session_id: UUID
+    preferred_date: str
+    time_slot: str

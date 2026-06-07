@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
-  Activity, Layers, UserCheck, FileText, FolderOpen, Send, 
+  Activity, Layers, FileText, FolderOpen, 
   ShieldAlert, RefreshCw, CheckCircle2, AlertTriangle,
   Play, RotateCcw, Sparkles, Search, Eye, Trash2,
   ChevronDown, ChevronRight, Folder, File,
@@ -9,6 +9,13 @@ import {
 
 const API_BASE = "http://localhost:8000/api";
 const DOCTOR_ID = "4a8f39b6-89d1-4db8-bbbe-d9616e00b8e2";
+
+const uuid4 = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
 
 const buildFileTree = (files) => {
   const root = { name: 'root', children: [], isFolder: true };
@@ -484,7 +491,6 @@ export default function App() {
     const path = window.location.pathname.replace('/', '').toLowerCase();
     const routeMap = {
       'workflow': 'workflow',
-      'onboarding': 'onboarding',
       'rag-ingestion': 'rag',
       'obsidian-mapping': 'obsidian'
     };
@@ -498,7 +504,6 @@ export default function App() {
   useEffect(() => {
     const tabToRoute = {
       'workflow': 'workflow',
-      'onboarding': 'onboarding',
       'rag': 'rag-ingestion',
       'obsidian': 'obsidian-mapping'
     };
@@ -520,6 +525,17 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
   
+  // --- Role & Landing State ---
+  const [userRole, setUserRole] = useState(() => loadState('userRole', null));
+
+  // --- Patient Portal State ---
+  const [patientChatLog, setPatientChatLog] = useState(() => loadState('patientChatLog', [
+    { sender: 'doctor', text: "Hello, I am Dr. Avery Sterling. How can I help you today?" }
+  ]));
+  const [patientChatInput, setPatientChatInput] = useState('');
+  const [patientSessionId, setPatientSessionId] = useState(() => loadState('patientSessionId', null));
+  const [patientLoading, setPatientLoading] = useState(false);
+
   // --- Global State ---
   const [configId, setConfigId] = useState(() => loadState('configId', '11111111-1111-1111-1111-111111111111'));
   const [activeVersion, setActiveVersion] = useState(() => loadState('activeVersion', '1.0.0'));
@@ -536,23 +552,7 @@ export default function App() {
   const [autopilot, setAutopilot] = useState(() => loadState('autopilot', true));
   const [newStep, setNewStep] = useState({ name: '', inputs: '', outputs: '', dependencies: '' });
 
-  // --- Onboarding Journalist State ---
-  const [transcript, setTranscript] = useState(() => loadState('transcript',
-    "Dr. Sterling: Initial intake gathers vitals including blood pressure and temperature. " +
-    "Then, we evaluate if patient complains of chest tightness. " +
-    "If temperature is >= 103, we escalate to emergency. " +
-    "Action plans involve scheduling immediate checkups or dispatching medical alerts."
-  ));
-  const [saturationScore, setSaturationScore] = useState(() => loadState('saturationScore', 0.45));
-  const [isSaturationSatisfied, setIsSaturationSatisfied] = useState(() => loadState('isSaturationSatisfied', false));
-  const [nextPrompt, setNextPrompt] = useState(() => loadState('nextPrompt', "Explain how you evaluate blood pressure limits?"));
-  const [chatLog, setChatLog] = useState(() => loadState('chatLog', [
-    { sender: 'journalist', text: "Welcome Dr. Sterling. Please explain your standard clinical intake routine?" },
-    { sender: 'expert', text: "Dr. Sterling: Initial intake gathers vitals including blood pressure and temperature. Then, we evaluate if patient complains of chest tightness." }
-  ]));
   const [chatInput, setChatInput] = useState('');
-  const [cotNodes, setCotNodes] = useState(() => loadState('cotNodes', []));
-  const [cotEdges, setCotEdges] = useState(() => loadState('cotEdges', []));
 
   // --- Ingestion State ---
   const [rawText, setRawText] = useState(() => loadState('rawText',
@@ -585,6 +585,9 @@ export default function App() {
 
   // --- Persist state to localStorage on change ---
   useEffect(() => {
+    saveState('userRole', userRole);
+    saveState('patientChatLog', patientChatLog);
+    saveState('patientSessionId', patientSessionId);
     saveState('activeTab', activeTab);
     saveState('configId', configId);
     saveState('activeVersion', activeVersion);
@@ -592,13 +595,6 @@ export default function App() {
     saveState('validationErrors', validationErrors);
     saveState('steps', steps);
     saveState('autopilot', autopilot);
-    saveState('transcript', transcript);
-    saveState('saturationScore', saturationScore);
-    saveState('isSaturationSatisfied', isSaturationSatisfied);
-    saveState('nextPrompt', nextPrompt);
-    saveState('chatLog', chatLog);
-    saveState('cotNodes', cotNodes);
-    saveState('cotEdges', cotEdges);
     saveState('rawText', rawText);
     saveState('ingestedChunks', ingestedChunks);
     saveState('obsidianFiles', obsidianFiles);
@@ -609,8 +605,7 @@ export default function App() {
     saveState('userQuery', userQuery);
     saveState('sandboxLog', sandboxLog);
     saveState('activeSessionState', activeSessionState);
-  }, [activeTab, configId, activeVersion, isFeasible, validationErrors, steps, autopilot,
-      transcript, saturationScore, isSaturationSatisfied, nextPrompt, chatLog, cotNodes, cotEdges,
+  }, [userRole, patientChatLog, patientSessionId, activeTab, configId, activeVersion, isFeasible, validationErrors, steps, autopilot,
       rawText, ingestedChunks, obsidianFiles, selectedObsidianFile, unlearnNodeInput, unlearnRationale,
       sessionId, userQuery, sandboxLog, activeSessionState]);
 
@@ -736,82 +731,41 @@ export default function App() {
     alert(`[MOCK DB] Config saved! Feasibility: ${check.is_feasible ? 'SUCCESS' : 'FAILED'}`);
   };
 
-  const handleSendChat = async () => {
-    if (!chatInput.trim()) return;
-    const newTranscript = transcript + "\nDr. Sterling: " + chatInput;
-    setTranscript(newTranscript);
-    
-    const userMsg = { sender: 'expert', text: chatInput };
-    setChatLog(prev => [...prev, userMsg]);
-    setChatInput('');
-
+  const handleSyncObsidian = async (silent = true) => {
     if (apiStatus === 'online') {
       try {
-        const res = await fetch(`${API_BASE}/onboarding/interview`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ transcript: newTranscript })
-        });
-        const data = await res.json();
-        setSaturationScore(data.saturation_score);
-        setIsSaturationSatisfied(data.is_satisfied);
-        setNextPrompt(data.next_prompt);
-        setChatLog(prev => [...prev, { sender: 'journalist', text: data.next_prompt }]);
-        return;
+        const res = await fetch(`${API_BASE}/config/sync`);
+        if (res.ok) {
+          const data = await res.json();
+          setObsidianFiles(data.files);
+          if (!silent) {
+            alert("Obsidian Vault mapping synchronized successfully with Supabase!");
+          }
+        } else {
+          if (!silent) {
+            alert("Failed to sync Obsidian mapping: Server returned an error.");
+          }
+        }
       } catch (err) {
-        console.error("Chat interview error", err);
+        console.error("Failed to sync Obsidian mapping", err);
+        if (!silent) {
+          alert("Failed to sync Obsidian mapping: Network error.");
+        }
+      }
+    } else {
+      if (!silent) {
+        alert("API Offline. Cannot sync with Supabase.");
       }
     }
-
-    // Local Fallback simulation
-    const nextSaturation = Math.min(1.0, saturationScore + 0.15);
-    setSaturationScore(nextSaturation);
-    const satisfied = nextSaturation >= 0.90;
-    setIsSaturationSatisfied(satisfied);
-    const prompts = [
-      "Can you describe what vital metrics triggers physician notification?",
-      "Excellent. Tell me about standard dosage recommendations for minor cases?",
-      "Onboarding saturation complete. Graph structure is ready to compile."
-    ];
-    const next = satisfied ? prompts[2] : prompts[Math.floor(Math.random() * 2)];
-    setNextPrompt(next);
-    setChatLog(prev => [...prev, { sender: 'journalist', text: next }]);
   };
 
-  const handleFinalizeOnboarding = async () => {
+  useEffect(() => {
     if (apiStatus === 'online') {
-      try {
-        const res = await fetch(`${API_BASE}/onboarding/finalize`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ config_id: configId, transcript })
-        });
-        const data = await res.json();
-        alert(`Onboarding finalized! Nodes: ${data.nodes_count}, Edges: ${data.edges_count}`);
-        
-        // Load files list
-        const cotFiles = [
-          { path: "cot_nodes/node_intake.md", type: "cot", node_id: crypto.randomUUID(), title: "Intake CoT", content: "Collect vitals...", tags: ["onboarding"] },
-          { path: "cot_nodes/node_evaluation.md", type: "cot", node_id: crypto.randomUUID(), title: "Evaluation CoT", content: "Check parameters...", tags: ["onboarding"] },
-          { path: "cot_nodes/node_action.md", type: "cot", node_id: crypto.randomUUID(), title: "Action CoT", content: "Trigger escalation...", tags: ["onboarding"] }
-        ];
-        setObsidianFiles(prev => [...cotFiles, ...prev]);
-        return;
-      } catch (err) {
-        alert("Failed to finalize: Saturation score must be >= 0.90");
-        return;
-      }
+      handleSyncObsidian(true);
     }
+  }, [apiStatus]);
 
-    // Mock onboarding nodes
-    const cotFiles = [
-      { path: "cot_nodes/node_intake.md", type: "cot", node_id: crypto.randomUUID(), title: "Intake CoT", content: "Collect vitals...", tags: ["onboarding"] },
-      { path: "cot_nodes/node_evaluation.md", type: "cot", node_id: crypto.randomUUID(), title: "Evaluation CoT", content: "Check parameters...", tags: ["onboarding"] },
-      { path: "cot_nodes/node_action.md", type: "cot", node_id: crypto.randomUUID(), title: "Action CoT", content: "Trigger escalation...", tags: ["onboarding"] }
-    ];
-    setObsidianFiles(prev => [...cotFiles, ...prev]);
-    alert("[MOCK ONBOARDING] CoT nodes and edges written to database and Obsidian Vault!");
-  };
+
 
   const handleIngest = async () => {
     setIngesting(true);
@@ -1099,6 +1053,68 @@ export default function App() {
     }, 1200);
   };
 
+  const handlePatientSendMessage = async () => {
+    if (!patientChatInput.trim() || patientLoading) return;
+    
+    const text = patientChatInput;
+    setPatientChatInput('');
+    setPatientChatLog(prev => [...prev, { sender: 'patient', text }]);
+    setPatientLoading(true);
+
+    let activePatientSessionId = patientSessionId;
+    
+    if (apiStatus === 'online') {
+      try {
+        if (!activePatientSessionId) {
+          const cid = configId || '11111111-1111-1111-1111-111111111111';
+          const initRes = await fetch(`${API_BASE}/session/initiate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversation_id: uuid4(), config_id: cid })
+          });
+          if (initRes.ok) {
+            const initData = await initRes.json();
+            activePatientSessionId = initData.session_id;
+            setPatientSessionId(activePatientSessionId);
+          }
+        }
+
+        if (activePatientSessionId) {
+          const queryRes = await fetch(`${API_BASE}/session/query`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: activePatientSessionId, query: text })
+          });
+          if (queryRes.ok) {
+            const queryData = await queryRes.json();
+            setPatientChatLog(prev => [...prev, { sender: 'doctor', text: queryData.output_message }]);
+            setPatientLoading(false);
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Patient query error:", err);
+      }
+    }
+
+    // Fallback simulation (offline)
+    setTimeout(() => {
+      const q = text.toLowerCase();
+      let response = "I have noted that. Let me look into your record. Could you please specify if you have any other symptoms or vitals?";
+      
+      if (q.includes("temp") || q.includes("temperature") || q.includes("fever")) {
+        response = "Running your temp check against our clinic triage guidelines. High temperature can indicate clinical escalation. Do you have any chest pain or difficulty breathing?";
+      } else if (q.includes("chest") || q.includes("pain") || q.includes("tight")) {
+        response = "CRITICAL ADVICE: You indicated chest tightness or pain. Please rest immediately and monitor your vitals. I am paging the emergency review physician team.";
+      } else if (q.includes("bp") || q.includes("blood pressure")) {
+        response = "Blood pressure checked. Please keep monitoring your vitals. How are you feeling otherwise?";
+      }
+      
+      setPatientChatLog(prev => [...prev, { sender: 'doctor', text: response }]);
+      setPatientLoading(false);
+    }, 1000);
+  };
+
   // --- Dynamic Layout UI Helpers ---
   const addWorkflowStep = () => {
     if (!newStep.name) return;
@@ -1136,6 +1152,144 @@ ${file.content || ''}
 `;
   };
 
+  // ═══════════════════════════════════════════════
+  // 1. Landing / Role Selection Screen
+  // ═══════════════════════════════════════════════
+  if (!userRole) {
+    return (
+      <div className="landing-container">
+        <div className="landing-header">
+          <h1 className="landing-title">Doctor-Twin Proxy System</h1>
+          <p className="landing-subtitle">
+            Secure, configuration-driven clinical twin and telemedicine chat proxy.
+          </p>
+        </div>
+        
+        <div className="landing-grid">
+          {/* Card 1: Doctor */}
+          <div className="landing-card" onClick={() => setUserRole('doctor')}>
+            <div className="landing-card-icon">
+              <Activity size={32} />
+            </div>
+            <h2 className="landing-card-title">Clinical Control Plane</h2>
+            <p className="landing-card-desc">
+              Manage expert twin configurations, review LangGraph agent telemetry, compile Obsidian knowledge vault files, and audit zero-trust security rule bounds.
+            </p>
+          </div>
+          
+          {/* Card 2: Patient */}
+          <div className="landing-card" onClick={() => {
+            setUserRole('patient');
+            if (!patientSessionId && apiStatus === 'online') {
+              const cid = configId || '11111111-1111-1111-1111-111111111111';
+              fetch(`${API_BASE}/session/initiate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ conversation_id: uuid4(), config_id: cid })
+              })
+              .then(res => res.ok ? res.json() : null)
+              .then(data => {
+                if (data) setPatientSessionId(data.session_id);
+              })
+              .catch(err => console.error("Auto-init patient session failed:", err));
+            }
+          }}>
+            <div className="landing-card-icon">
+              <Layers size={32} style={{ color: 'var(--success)' }} />
+            </div>
+            <h2 className="landing-card-title">Patient Portal</h2>
+            <p className="landing-card-desc">
+              Connect directly with Dr. Avery Sterling to report health updates, discuss symptoms, or seek follow-up advice through a secure portal.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════
+  // 2. Patient Telemedicine Chat Portal
+  // ═══════════════════════════════════════════════
+  if (userRole === 'patient') {
+    return (
+      <div className="patient-container">
+        <div className="patient-chat-window">
+          {/* Header */}
+          <div className="patient-chat-header">
+            <div className="patient-doctor-info">
+              <div className="patient-avatar">
+                AS
+                <div className="patient-status-dot"></div>
+              </div>
+              <div>
+                <h3 className="patient-doctor-name">Dr. Avery Sterling</h3>
+                <span className="patient-doctor-status">Online • Primary Care</span>
+              </div>
+            </div>
+            <button 
+              className="btn btn-secondary" 
+              onClick={() => {
+                setUserRole(null);
+                setPatientChatLog([
+                  { sender: 'doctor', text: "Hello, I am Dr. Avery Sterling. How can I help you today?" }
+                ]);
+                setPatientSessionId(null);
+              }}
+              style={{ fontSize: '12px', padding: '6px 12px' }}
+            >
+              Exit Portal
+            </button>
+          </div>
+
+          {/* Chat Body */}
+          <div className="patient-chat-body">
+            {patientChatLog.map((msg, i) => (
+              <div key={i} className={`patient-message-row ${msg.sender === 'patient' ? 'sent' : 'received'}`}>
+                <div className="patient-bubble">
+                  {msg.text}
+                </div>
+              </div>
+            ))}
+            
+            {patientLoading && (
+              <div className="patient-message-row received">
+                <div className="patient-bubble" style={{ background: 'var(--bg-tertiary)' }}>
+                  <div className="typing-indicator">
+                    <span className="typing-dot"></span>
+                    <span className="typing-dot"></span>
+                    <span className="typing-dot"></span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Footer Input */}
+          <div className="patient-chat-footer">
+            <input 
+              className="patient-input"
+              placeholder="Type your message..."
+              value={patientChatInput}
+              onChange={e => setPatientChatInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handlePatientSendMessage()}
+              disabled={patientLoading}
+            />
+            <button 
+              className="patient-send-btn"
+              onClick={handlePatientSendMessage}
+              disabled={patientLoading || !patientChatInput.trim()}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       {/* LEFT SIDEBAR */}
@@ -1164,13 +1318,7 @@ ${file.content || ''}
             <span>Workflow Config</span>
           </button>
           
-          <button 
-            className={`nav-link w-full ${activeTab === 'onboarding' ? 'active' : ''}`}
-            onClick={() => setActiveTab('onboarding')}
-          >
-            <UserCheck size={18} />
-            <span>Onboarding Expert</span>
-          </button>
+
 
           <button 
             className={`nav-link w-full ${activeTab === 'ingestion' ? 'active' : ''}`}
@@ -1186,6 +1334,15 @@ ${file.content || ''}
           >
             <FolderOpen size={18} />
             <span>Obsidian Mapping</span>
+          </button>
+
+          <button 
+            className="nav-link w-full"
+            onClick={() => setUserRole(null)}
+            style={{ marginTop: '24px', color: 'var(--error)' }}
+          >
+            <ShieldAlert size={18} style={{ color: 'var(--error)' }} />
+            <span>Switch Role</span>
           </button>
         </nav>
 
@@ -1326,83 +1483,7 @@ ${file.content || ''}
           </div>
         )}
 
-        {/* ONBOARDING JOURNALIST TAB */}
-        {activeTab === 'onboarding' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '24px' }}>
-            <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', height: '520px' }}>
-              <h3 style={{ fontSize: '18px', marginBottom: '16px' }}>Journalist Interview Terminal</h3>
-              
-              {/* Chat display */}
-              <div style={{ flex: 1, overflowY: 'auto', border: '1px solid var(--border-light)', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(0,0,0,0.2)' }}>
-                {chatLog.map((c, i) => (
-                  <div key={i} style={{ 
-                    alignSelf: c.sender === 'journalist' ? 'flex-start' : 'flex-end',
-                    background: c.sender === 'journalist' ? 'var(--bg-tertiary)' : 'var(--primary)',
-                    padding: '10px 14px',
-                    borderRadius: '8px',
-                    maxWidth: '80%',
-                    fontSize: '14px'
-                  }}>
-                    <strong style={{ display: 'block', fontSize: '11px', opacity: 0.8, marginBottom: '2px' }}>
-                      {c.sender === 'journalist' ? 'AI Journalist' : 'Dr. Avery Sterling'}
-                    </strong>
-                    {c.text}
-                  </div>
-                ))}
-              </div>
 
-              {/* Chat Input */}
-              <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
-                <input 
-                  className="form-input" 
-                  style={{ flex: 1 }}
-                  placeholder="Answer the question to train your twin..."
-                  value={chatInput}
-                  onChange={e => setChatInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleSendChat()}
-                />
-                <button className="btn btn-primary" onClick={handleSendChat}>
-                  <Send size={16} />
-                </button>
-              </div>
-            </div>
-
-            {/* Saturation Side Panel */}
-            <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', justifyItems: 'space-between', gap: '24px' }}>
-              <div>
-                <h3 style={{ fontSize: '18px', marginBottom: '16px' }}>Knowledge Saturation</h3>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '8px' }}>
-                  <span>Expert Saturation:</span>
-                  <span style={{ fontWeight: 700 }}>{(saturationScore * 100).toFixed(0)}%</span>
-                </div>
-                
-                {/* Progress bar */}
-                <div style={{ height: '12px', width: '100%', background: 'var(--bg-tertiary)', borderRadius: '6px', overflow: 'hidden', marginBottom: '12px' }}>
-                  <div style={{ 
-                    height: '100%', 
-                    width: `${saturationScore * 100}%`, 
-                    background: 'linear-gradient(90deg, var(--primary), var(--secondary))',
-                    transition: 'width 0.4s ease'
-                  }}></div>
-                </div>
-                
-                <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  Target Saturation limit is <strong>90%</strong> to ensure zero-hallucination epistemic fencing bounds are complete.
-                </p>
-              </div>
-
-              <div>
-                <button 
-                  className={`btn w-full ${isSaturationSatisfied ? 'btn-primary' : 'btn-secondary'}`}
-                  disabled={!isSaturationSatisfied}
-                  onClick={handleFinalizeOnboarding}
-                >
-                  Finalize CoT Graph
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* INGESTION HUB TAB */}
         {activeTab === 'ingestion' && (
@@ -1481,9 +1562,28 @@ ${file.content || ''}
               <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <Sparkles size={18} style={{ color: 'var(--secondary)' }} />
                 <h3 style={{ fontSize: '16px', margin: 0, fontWeight: 600 }}>Knowledge Graph</h3>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: 'auto' }}>
-                  {obsidianFiles.length} node{obsidianFiles.length !== 1 ? 's' : ''}
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  ({obsidianFiles.length} node{obsidianFiles.length !== 1 ? 's' : ''})
                 </span>
+                <button 
+                  onClick={() => handleSyncObsidian(false)} 
+                  className="btn btn-secondary" 
+                  style={{ 
+                    marginLeft: 'auto', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '6px', 
+                    padding: '4px 10px', 
+                    fontSize: '11px', 
+                    height: '26px',
+                    borderColor: 'var(--primary)',
+                    color: 'var(--primary)'
+                  }}
+                  title="Force Sync with Supabase"
+                >
+                  <RefreshCw size={10} />
+                  Sync
+                </button>
               </div>
               <GraphicalTreeView
                 files={obsidianFiles}

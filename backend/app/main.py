@@ -14,7 +14,6 @@ from backend.app.api.dependencies import provider
 # Route modules
 from backend.app.api.routes.config_routes import router as config_router
 from backend.app.api.routes.session_routes import router as session_router
-from backend.app.api.routes.onboarding_routes import router as onboarding_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -36,7 +35,6 @@ app.add_middleware(PIISanitizationMiddleware)
 # Register domain-specific route modules
 app.include_router(config_router, prefix=settings.API_V1_STR)
 app.include_router(session_router, prefix=settings.API_V1_STR)
-app.include_router(onboarding_router, prefix=settings.API_V1_STR)
 
 
 @app.on_event("startup")

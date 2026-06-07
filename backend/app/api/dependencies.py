@@ -33,7 +33,6 @@ from backend.app.services.export.obsidian_export import ObsidianExportService
 
 # Services
 from backend.app.services.config_service import ConfigService
-from backend.app.services.onboarding_service import OnboardingService
 from backend.app.services.unlearning_service import UnlearningService
 from backend.app.services.ingestion_service import StructuralRAGIngestionPipeline
 from backend.app.services.hybrid_rag_service import HybridRAGEngine
@@ -78,7 +77,6 @@ class ServiceProvider:
         self._export_service: ExportService | None = None
         self._rag_engine: HybridRAGEngine | None = None
         self._config_service: ConfigService | None = None
-        self._onboarding_service: OnboardingService | None = None
         self._unlearning_service: UnlearningService | None = None
         self._ingestion_pipeline: StructuralRAGIngestionPipeline | None = None
         self._orchestrator: ZeroTrustOrchestrator | None = None
@@ -137,9 +135,6 @@ class ServiceProvider:
         self._config_service = ConfigService(
             self._config_repo, self._cot_repo, self._export_service
         )
-        self._onboarding_service = OnboardingService(
-            self._config_repo, self._cot_repo, self._export_service
-        )
         self._unlearning_service = UnlearningService(
             self._config_repo, self._cot_repo, self._export_service
         )
@@ -192,10 +187,6 @@ class ServiceProvider:
         return self._config_service
 
     @property
-    def onboarding_service(self) -> OnboardingService:
-        return self._onboarding_service
-
-    @property
     def unlearning_service(self) -> UnlearningService:
         return self._unlearning_service
 
@@ -246,9 +237,6 @@ def get_rag_engine() -> HybridRAGEngine:
 def get_config_service() -> ConfigService:
     return provider.config_service
 
-
-def get_onboarding_service() -> OnboardingService:
-    return provider.onboarding_service
 
 
 def get_unlearning_service() -> UnlearningService:
