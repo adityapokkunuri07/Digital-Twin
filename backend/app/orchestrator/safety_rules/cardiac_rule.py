@@ -14,4 +14,9 @@ class CardiacSafetyRule(SafetyRule):
     ) -> Tuple[bool, str]:
         if gathered_data.get("chest_pain", False):
             return True, "Potential cardiac symptom (chest pain) reported"
+            
+        message = gathered_data.get("message", "").lower()
+        if "chest pain" in message or "chest tightness" in message or "heart attack" in message:
+            return True, "Potential cardiac symptom reported"
+            
         return False, ""

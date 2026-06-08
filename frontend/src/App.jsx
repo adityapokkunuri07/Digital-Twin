@@ -1103,14 +1103,14 @@ export default function App() {
     // Fallback simulation (offline)
     setTimeout(() => {
       const q = text.toLowerCase();
-      let response = "I have noted that. Let me look into your record. Could you please specify if you have any other symptoms or vitals?";
+      let response = "⚠️ [OFFLINE MODE]: The backend server is currently disconnected or unavailable. Please ensure `uvicorn backend.app.main:app` is running on port 8000.";
 
       if (q.includes("temp") || q.includes("temperature") || q.includes("fever")) {
-        response = "Running your temp check against our clinic triage guidelines. High temperature can indicate clinical escalation. Do you have any chest pain or difficulty breathing?";
+        response = "⚠️ [OFFLINE MODE]: (Simulated) Running your temp check against our clinic triage guidelines. High temperature can indicate clinical escalation. Do you have any chest pain or difficulty breathing?";
       } else if (q.includes("chest") || q.includes("pain") || q.includes("tight")) {
-        response = "CRITICAL ADVICE: You indicated chest tightness or pain. Please rest immediately and monitor your vitals. I am paging the emergency review physician team.";
+        response = "⚠️ [OFFLINE MODE]: (Simulated) CRITICAL ADVICE: You indicated chest tightness or pain. Please rest immediately and monitor your vitals. I am paging the emergency review physician team.";
       } else if (q.includes("bp") || q.includes("blood pressure")) {
-        response = "Blood pressure checked. Please keep monitoring your vitals. How are you feeling otherwise?";
+        response = "⚠️ [OFFLINE MODE]: (Simulated) Blood pressure checked. Please keep monitoring your vitals. How are you feeling otherwise?";
       }
 
       setPatientChatLog(prev => [...prev, { sender: 'doctor', text: response }]);
@@ -1266,6 +1266,106 @@ ${file.content || ''}
               </div>
             )}
           </div>
+
+          {/* Quick Reply Options */}
+          {!patientLoading && patientChatLog.length > 0 && patientChatLog[patientChatLog.length - 1].sender === 'doctor' && (() => {
+            const lastMsg = patientChatLog[patientChatLog.length - 1].text.toLowerCase();
+            let options = [];
+
+            if (lastMsg.includes('temperature') || lastMsg.includes('body temp')) {
+              options = [
+                { label: '🌡️ 98.6°F (Normal)', value: 'My temperature is 98.6' },
+                { label: '🌡️ 101.2°F (Fever)', value: 'My temperature is 101.2' },
+                { label: '🌡️ 104°F (High Fever)', value: 'My temperature is 104' },
+              ];
+            } else if (lastMsg.includes('blood pressure')) {
+              options = [
+                { label: '💓 120/80 (Normal)', value: 'My bp is 120/80' },
+                { label: '💓 140/90 (High)', value: 'My bp is 140/90' },
+                { label: '💓 160/100 (Very High)', value: 'My bp is 160/100' },
+              ];
+            } else if (lastMsg.includes('chest pain') || lastMsg.includes('shortness of breath') || lastMsg.includes('palpitation') || lastMsg.includes('heart rhythm')) {
+              options = [
+                { label: '✅ No, nothing at all', value: 'No, nothing at all' },
+                { label: '⚠️ Yes, I have chest pain', value: 'Yes, I have chest pain' },
+                { label: '🤔 I\'m not sure', value: "I'm not sure" },
+              ];
+            } else if (lastMsg.includes('smoking') || lastMsg.includes('diabetes') || lastMsg.includes('family') || lastMsg.includes('bmi') || lastMsg.includes('height')) {
+              options = [
+                { label: '✅ No risk factors', value: 'No, nothing at all' },
+                { label: '⚠️ Yes, some risk factors', value: 'Yes, I smoke and have diabetes' },
+                { label: '🤔 I\'m not sure', value: "I'm not sure" },
+              ];
+            } else {
+              options = [
+                { label: '✅ No, nothing at all', value: 'No, nothing at all' },
+                { label: '⚠️ Yes, I have chest pain', value: 'Yes, I have chest pain' },
+                { label: '🤔 I\'m not sure', value: "I'm not sure" },
+              ];
+            }
+
+            // Direct-send function that bypasses stale React state
+            const sendQuickReply = async (replyText) => {
+              if (patientLoading) return;
+              setPatientChatInput('');
+              setPatientChatLog(prev => [...prev, { sender: 'patient', text: replyText }]);
+              setPatientLoading(true);
+
+              let activeId = patientSessionId;
+              if (apiStatus === 'online') {
+                try {
+                  if (!activeId) {
+                    const cid = configId || '11111111-1111-1111-1111-111111111111';
+                    const initRes = await fetch(`${API_BASE}/session/initiate`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ conversation_id: uuid4(), config_id: cid })
+                    });
+                    if (initRes.ok) {
+                      const initData = await initRes.json();
+                      activeId = initData.session_id;
+                      setPatientSessionId(activeId);
+                    }
+                  }
+                  if (activeId) {
+                    const queryRes = await fetch(`${API_BASE}/session/query`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ session_id: activeId, query: replyText })
+                    });
+                    if (queryRes.ok) {
+                      const queryData = await queryRes.json();
+                      setPatientChatLog(prev => [...prev, { sender: 'doctor', text: queryData.output_message }]);
+                      setPatientLoading(false);
+                      return;
+                    }
+                  }
+                } catch (err) {
+                  console.error("Quick reply error:", err);
+                }
+              }
+              // Offline fallback
+              setTimeout(() => {
+                setPatientChatLog(prev => [...prev, { sender: 'doctor', text: '⚠️ [OFFLINE MODE]: Backend server is disconnected.' }]);
+                setPatientLoading(false);
+              }, 500);
+            };
+
+            return (
+              <div style={{ padding: '0 20px 12px 20px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {options.map((opt, i) => (
+                  <button
+                    key={i}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '12px', padding: '6px 12px', borderRadius: '16px', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', transition: 'all 0.2s' }}
+                    onClick={() => sendQuickReply(opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
 
           {/* Footer Input */}
           <div className="patient-chat-footer">

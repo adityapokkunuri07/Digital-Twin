@@ -28,6 +28,7 @@ export default function PreConsultation() {
   const [chatInput, setChatInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const chatEndRef = useRef(null);
+  const isSendingRef = useRef(false);
 
   // 4. Doctor Review State
   const [synthesisData, setSynthesisData] = useState(null);
@@ -124,12 +125,14 @@ export default function PreConsultation() {
   };
 
   const sendMessage = async () => {
-    if (!chatInput.trim() || !sessionId) return;
+    if (!chatInput.trim() || !sessionId || isSendingRef.current) return;
     
+    isSendingRef.current = true;
     const userMsg = chatInput;
-    setChatLog(prev => [...prev, { sender: 'PATIENT', text: userMsg }]);
     setChatInput('');
     setIsTyping(true);
+    // Use functional state update to prevent any race conditions
+    setChatLog(prev => [...prev, { sender: 'PATIENT', text: userMsg }]);
 
     try {
       const res = await fetch(`${API_BASE}/pre-consult/chat`, {
@@ -140,6 +143,7 @@ export default function PreConsultation() {
       const data = await res.json();
       
       setIsTyping(false);
+      isSendingRef.current = false;
 
       if (data.alert) {
         setChatLog(prev => [...prev, { sender: 'SYSTEM', text: data.alert }]);
@@ -156,6 +160,7 @@ export default function PreConsultation() {
       }
     } catch (err) {
       setIsTyping(false);
+      isSendingRef.current = false;
       console.error(err);
     }
   };

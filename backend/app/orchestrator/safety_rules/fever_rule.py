@@ -17,4 +17,10 @@ class FeverSafetyRule(SafetyRule):
         temperature = gathered_data.get("temperature")
         if temperature is not None and temperature >= self.THRESHOLD:
             return True, f"Extreme fever detected (>={self.THRESHOLD}°F)"
+            
+        message = gathered_data.get("message", "").lower()
+        if "103" in message or "104" in message or "105" in message:
+            if "fever" in message or "temperature" in message or "temp" in message:
+                return True, f"Extreme fever reported in chat (>={self.THRESHOLD}°F)"
+                
         return False, ""
