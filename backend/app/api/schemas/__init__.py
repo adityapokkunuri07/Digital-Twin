@@ -13,6 +13,16 @@ from backend.app.api.schemas.onboarding_schemas import (
     InterviewRequest,
     FinalizeOnboardingRequest,
 )
+from backend.app.api.schemas.preconsult_schemas import (
+    PreConsultStatus,
+    SenderType,
+    AppointmentStatus,
+    StartPreConsultRequest,
+    ChatTurnRequest,
+    DoctorReviewRequest,
+    BookAppointmentRequest,
+    PreConsultSessionResponse,
+)
 
 __all__ = [
     "ValidateConfigRequest",
@@ -23,4 +33,12 @@ __all__ = [
     "QuerySessionRequest",
     "InterviewRequest",
     "FinalizeOnboardingRequest",
+    "PreConsultStatus",
+    "SenderType",
+    "AppointmentStatus",
+    "StartPreConsultRequest",
+    "ChatTurnRequest",
+    "DoctorReviewRequest",
+    "BookAppointmentRequest",
+    "PreConsultSessionResponse",
 ]

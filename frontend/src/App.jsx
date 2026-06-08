@@ -1,17 +1,18 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { 
-  Activity, Layers, FileText, FolderOpen, 
+import {
+  Activity, Layers, FileText, FolderOpen,
   ShieldAlert, RefreshCw, CheckCircle2, AlertTriangle,
   Play, RotateCcw, Sparkles, Search, Eye, Trash2,
   ChevronDown, ChevronRight, Folder, File,
   ZoomIn, ZoomOut, Maximize2
 } from 'lucide-react';
+import PreConsultation from './PreConsultation';
 
 const API_BASE = "http://localhost:8000/api";
 const DOCTOR_ID = "4a8f39b6-89d1-4db8-bbbe-d9616e00b8e2";
 
 const uuid4 = () => {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
     const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
@@ -19,26 +20,26 @@ const uuid4 = () => {
 
 const buildFileTree = (files) => {
   const root = { name: 'root', children: [], isFolder: true };
-  
+
   files.forEach(file => {
     let path = file.path;
     // Explode dot-notation for knowledge chunks
     if (path.startsWith('knowledge/')) {
-       let subPath = path.substring(10);
-       if (subPath.endsWith('.md')) {
-          subPath = subPath.substring(0, subPath.length - 3);
-          const parts = subPath.split('.');
-          parts[parts.length - 1] += '.md';
-          path = 'knowledge/' + parts.join('/');
-       }
+      let subPath = path.substring(10);
+      if (subPath.endsWith('.md')) {
+        subPath = subPath.substring(0, subPath.length - 3);
+        const parts = subPath.split('.');
+        parts[parts.length - 1] += '.md';
+        path = 'knowledge/' + parts.join('/');
+      }
     }
-    
+
     const parts = path.split('/');
     let currentLevel = root.children;
-    
+
     parts.forEach((part, index) => {
       let existing = currentLevel.find(item => item.name === part);
-      
+
       if (index === parts.length - 1) {
         if (!existing) {
           currentLevel.push({ name: part, isFile: true, fileData: file });
@@ -59,7 +60,7 @@ const buildFileTree = (files) => {
       }
     });
   });
-  
+
   return root.children;
 };
 
@@ -71,13 +72,13 @@ const FileTreeNode = ({ node, level, selectedFile, onSelect, onUnlearnSelect }) 
     const file = node.fileData;
     const isSelected = selectedFile?.path === file.path;
     return (
-      <div 
+      <div
         onClick={() => {
           onSelect(file);
           if (file.node_id) onUnlearnSelect(file.node_id);
         }}
-        style={{ 
-          display: 'flex', alignItems: 'center', gap: '6px', 
+        style={{
+          display: 'flex', alignItems: 'center', gap: '6px',
           padding: `6px 10px 6px ${paddingLeft}px`,
           cursor: 'pointer',
           background: isSelected ? 'rgba(255,255,255,0.08)' : 'transparent',
@@ -97,10 +98,10 @@ const FileTreeNode = ({ node, level, selectedFile, onSelect, onUnlearnSelect }) 
 
   return (
     <div>
-      <div 
+      <div
         onClick={() => setIsOpen(!isOpen)}
-        style={{ 
-          display: 'flex', alignItems: 'center', gap: '6px', 
+        style={{
+          display: 'flex', alignItems: 'center', gap: '6px',
           padding: `6px 10px 6px ${paddingLeft - 4}px`,
           cursor: 'pointer',
           color: 'var(--text-secondary)',
@@ -116,10 +117,10 @@ const FileTreeNode = ({ node, level, selectedFile, onSelect, onUnlearnSelect }) 
       {isOpen && (
         <div>
           {node.children.map((child, i) => (
-            <FileTreeNode 
-              key={i} 
-              node={child} 
-              level={level + 1} 
+            <FileTreeNode
+              key={i}
+              node={child}
+              level={level + 1}
               selectedFile={selectedFile}
               onSelect={onSelect}
               onUnlearnSelect={onUnlearnSelect}
@@ -142,11 +143,11 @@ const SIBLING_GAP = 40;
 
 // Curated color palette — one per depth layer (cycles if deeper)
 const LAYER_COLORS = [
-  { bg: 'rgba(191, 90, 242, 0.22)', border: 'rgba(191, 90, 242, 0.5)',  accent: '#BF5AF2', edge: 'rgba(191, 90, 242, 0.35)' },  // Purple  — L0
+  { bg: 'rgba(191, 90, 242, 0.22)', border: 'rgba(191, 90, 242, 0.5)', accent: '#BF5AF2', edge: 'rgba(191, 90, 242, 0.35)' },  // Purple  — L0
   { bg: 'rgba(10, 132, 255, 0.18)', border: 'rgba(10, 132, 255, 0.45)', accent: '#0A84FF', edge: 'rgba(10, 132, 255, 0.30)' },  // Blue    — L1
-  { bg: 'rgba(50, 215, 75, 0.15)',  border: 'rgba(50, 215, 75, 0.40)',  accent: '#32D74B', edge: 'rgba(50, 215, 75, 0.28)' },   // Green   — L2
+  { bg: 'rgba(50, 215, 75, 0.15)', border: 'rgba(50, 215, 75, 0.40)', accent: '#32D74B', edge: 'rgba(50, 215, 75, 0.28)' },   // Green   — L2
   { bg: 'rgba(255, 159, 10, 0.16)', border: 'rgba(255, 159, 10, 0.42)', accent: '#FF9F0A', edge: 'rgba(255, 159, 10, 0.30)' },  // Orange  — L3
-  { bg: 'rgba(255, 55, 95, 0.15)',  border: 'rgba(255, 55, 95, 0.40)',  accent: '#FF375F', edge: 'rgba(255, 55, 95, 0.28)' },   // Pink    — L4
+  { bg: 'rgba(255, 55, 95, 0.15)', border: 'rgba(255, 55, 95, 0.40)', accent: '#FF375F', edge: 'rgba(255, 55, 95, 0.28)' },   // Pink    — L4
   { bg: 'rgba(90, 200, 250, 0.15)', border: 'rgba(90, 200, 250, 0.40)', accent: '#5AC8FA', edge: 'rgba(90, 200, 250, 0.28)' },  // Cyan    — L5
 ];
 
@@ -244,7 +245,7 @@ const GraphicalTreeView = ({ files, selectedFile, onSelect, onUnlearnSelect }) =
 
   if (files.length === 0) {
     return (
-      <div style={{ 
+      <div style={{
         color: 'var(--text-muted)', padding: '60px 20px', textAlign: 'center', fontSize: '13px',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', height: '100%', justifyContent: 'center'
       }}>
@@ -379,15 +380,15 @@ const GraphicalTreeView = ({ files, selectedFile, onSelect, onUnlearnSelect }) =
 
 const buildChunkTree = (chunks) => {
   const root = { name: 'root', children: [], isFolder: true };
-  
+
   chunks.forEach(chunk => {
     let path = chunk.current_path || chunk.title.toLowerCase().replace(/\s+/g, '_');
     const parts = path.split('.');
     let currentLevel = root.children;
-    
+
     parts.forEach((part, index) => {
       let existing = currentLevel.find(item => item.name === part);
-      
+
       if (index === parts.length - 1) {
         if (!existing) {
           currentLevel.push({ name: part, isChunk: true, chunkData: chunk });
@@ -408,7 +409,7 @@ const buildChunkTree = (chunks) => {
       }
     });
   });
-  
+
   return root.children;
 };
 
@@ -421,10 +422,10 @@ const ChunkTreeNode = ({ node, level }) => {
   return (
     <div style={{ marginLeft: paddingLeft + 'px', marginBottom: node.isFolder ? '0' : '12px' }}>
       {(node.isFolder || hasChildren) && (
-        <div 
+        <div
           onClick={() => setIsOpen(!isOpen)}
-          style={{ 
-            display: 'flex', alignItems: 'center', gap: '8px', 
+          style={{
+            display: 'flex', alignItems: 'center', gap: '8px',
             padding: '8px 12px', cursor: 'pointer', color: 'var(--text-primary)',
             borderRadius: '8px', marginBottom: '8px', background: 'rgba(255,255,255,0.03)',
             border: '1px solid var(--border-light)'
@@ -441,7 +442,7 @@ const ChunkTreeNode = ({ node, level }) => {
       {(!node.isFolder || isOpen) && (
         <div style={{ marginLeft: (node.isFolder || hasChildren) ? '24px' : '0px' }}>
           {node.isChunk && chunk && (
-            <div style={{ 
+            <div style={{
               marginBottom: '12px', padding: '16px', background: 'rgba(255,255,255,0.02)',
               border: '1px solid var(--border-light)', borderRadius: '12px', fontSize: '13px'
             }}>
@@ -450,13 +451,13 @@ const ChunkTreeNode = ({ node, level }) => {
                 <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--text-primary)' }}>{chunk.title}</h4>
               </div>
               <p style={{ color: 'var(--text-secondary)', marginBottom: '12px', lineHeight: '1.5' }}>{chunk.content}</p>
-              
+
               {chunk.tags && chunk.tags.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
                   {chunk.tags.map((t, i) => <span key={i} className="badge badge-info" style={{ fontSize: '10px', padding: '4px 8px' }}>{t}</span>)}
                 </div>
               )}
-              
+
               {chunk.synthetic_questions && chunk.synthetic_questions.length > 0 && (
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)', background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '6px' }}>
                   <strong style={{ color: 'var(--secondary)' }}>Q:</strong> {chunk.synthetic_questions[0]}
@@ -483,7 +484,7 @@ export default function App() {
     } catch { return fallback; }
   };
   const saveState = (key, value) => {
-    try { localStorage.setItem(`dt_${key}`, JSON.stringify(value)); } catch {}
+    try { localStorage.setItem(`dt_${key}`, JSON.stringify(value)); } catch { }
   };
 
   const [activeTab, setActiveTab] = useState(() => {
@@ -492,10 +493,11 @@ export default function App() {
     const routeMap = {
       'workflow': 'workflow',
       'rag-ingestion': 'rag',
-      'obsidian-mapping': 'obsidian'
+      'obsidian-mapping': 'obsidian',
+      'pre-consult': 'pre-consult'
     };
     if (routeMap[path]) return routeMap[path];
-    
+
     // 2. Fallback to localStorage or default
     return loadState('activeTab', 'workflow');
   });
@@ -505,7 +507,8 @@ export default function App() {
     const tabToRoute = {
       'workflow': 'workflow',
       'rag': 'rag-ingestion',
-      'obsidian': 'obsidian-mapping'
+      'obsidian': 'obsidian-mapping',
+      'pre-consult': 'pre-consult'
     };
     const newPath = `/${tabToRoute[activeTab] || 'workflow'}`;
     if (window.location.pathname !== newPath) {
@@ -524,7 +527,7 @@ export default function App() {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
-  
+
   // --- Role & Landing State ---
   const [userRole, setUserRole] = useState(() => loadState('userRole', null));
 
@@ -606,8 +609,8 @@ export default function App() {
     saveState('sandboxLog', sandboxLog);
     saveState('activeSessionState', activeSessionState);
   }, [userRole, patientChatLog, patientSessionId, activeTab, configId, activeVersion, isFeasible, validationErrors, steps, autopilot,
-      rawText, ingestedChunks, obsidianFiles, selectedObsidianFile, unlearnNodeInput, unlearnRationale,
-      sessionId, userQuery, sandboxLog, activeSessionState]);
+    rawText, ingestedChunks, obsidianFiles, selectedObsidianFile, unlearnNodeInput, unlearnRationale,
+    sessionId, userQuery, sandboxLog, activeSessionState]);
 
   // --- Probe Backend Status on Load ---
   useEffect(() => {
@@ -632,7 +635,7 @@ export default function App() {
     const payload = {
       workflow_config: { steps: currentSteps }
     };
-    
+
     if (apiStatus === 'online') {
       try {
         const res = await fetch(`${API_BASE}/config/validate`, {
@@ -653,7 +656,7 @@ export default function App() {
     const errors = [];
     const stepIds = currentSteps.map(s => s.id);
     const resolvedVars = new Set();
-    
+
     // Cycle check (simple sequential checking)
     let cycle = false;
     currentSteps.forEach(s => {
@@ -698,7 +701,7 @@ export default function App() {
         const data = await res.json();
         setIsFeasible(data.is_feasible);
         setValidationErrors(data.errors);
-        
+
         // Log to synced files
         setObsidianFiles(prev => [
           {
@@ -777,7 +780,7 @@ export default function App() {
           body: JSON.stringify({ config_id: configId, raw_text: rawText })
         });
         const data = await res.json();
-        
+
         if (!res.ok) {
           console.error("Server error:", data.detail || data);
           alert("Ingestion failed: " + (data.detail || "Server Error"));
@@ -786,7 +789,7 @@ export default function App() {
         }
 
         setIngestedChunks(data.chunks);
-        
+
         const newFiles = data.chunks.map(c => ({
           path: `knowledge/${c.current_path || c.title.toLowerCase().replace(/\s+/g, '_')}.md`,
           type: 'knowledge',
@@ -799,7 +802,7 @@ export default function App() {
           quarantine_status: false,
           unlearning_rationale: ""
         }));
-        
+
         setObsidianFiles(prev => {
           const filtered = prev.filter(f => !f.path.startsWith('knowledge/'));
           return [...newFiles, ...filtered];
@@ -844,7 +847,7 @@ export default function App() {
           body: formData
         });
         const data = await res.json();
-        
+
         if (!res.ok) {
           console.error("Upload error:", data.detail || data);
           alert("Upload failed: " + (data.detail || "Server Error"));
@@ -856,7 +859,7 @@ export default function App() {
         if (data.raw_text) {
           setRawText(data.raw_text);
         }
-        
+
         const newFiles = data.chunks.map(c => ({
           path: `knowledge/${c.current_path || c.title.toLowerCase().replace(/\s+/g, '_')}.md`,
           type: 'knowledge',
@@ -869,7 +872,7 @@ export default function App() {
           quarantine_status: false,
           unlearning_rationale: ""
         }));
-        
+
         setObsidianFiles(prev => {
           const filtered = prev.filter(f => !f.path.startsWith('knowledge/'));
           return [...newFiles, ...filtered];
@@ -883,8 +886,8 @@ export default function App() {
         setIngesting(false);
       }
     } else {
-       alert("API Offline. Mock mode only supports manual text pasting.");
-       setIngesting(false);
+      alert("API Offline. Mock mode only supports manual text pasting.");
+      setIngesting(false);
     }
   };
 
@@ -917,7 +920,7 @@ export default function App() {
       node_ids: [unlearnNodeInput],
       rationale: unlearnRationale
     };
-    
+
     const updateLocalState = () => {
       // Completely remove the node from the graphical tree dynamically
       setObsidianFiles(prev => prev.filter(f => f.node_id !== unlearnNodeInput && !f.path.includes(unlearnNodeInput)));
@@ -998,7 +1001,7 @@ export default function App() {
         const data = await res.json();
         setActiveSessionState(data);
         setSandboxLog(prev => [
-          ...prev, 
+          ...prev,
           { node: data.current_node, msg: `User: "${userQuery}" -> Twin: "${data.output_message}"` }
         ]);
         setLoadingSandbox(false);
@@ -1055,14 +1058,14 @@ export default function App() {
 
   const handlePatientSendMessage = async () => {
     if (!patientChatInput.trim() || patientLoading) return;
-    
+
     const text = patientChatInput;
     setPatientChatInput('');
     setPatientChatLog(prev => [...prev, { sender: 'patient', text }]);
     setPatientLoading(true);
 
     let activePatientSessionId = patientSessionId;
-    
+
     if (apiStatus === 'online') {
       try {
         if (!activePatientSessionId) {
@@ -1101,7 +1104,7 @@ export default function App() {
     setTimeout(() => {
       const q = text.toLowerCase();
       let response = "I have noted that. Let me look into your record. Could you please specify if you have any other symptoms or vitals?";
-      
+
       if (q.includes("temp") || q.includes("temperature") || q.includes("fever")) {
         response = "Running your temp check against our clinic triage guidelines. High temperature can indicate clinical escalation. Do you have any chest pain or difficulty breathing?";
       } else if (q.includes("chest") || q.includes("pain") || q.includes("tight")) {
@@ -1109,7 +1112,7 @@ export default function App() {
       } else if (q.includes("bp") || q.includes("blood pressure")) {
         response = "Blood pressure checked. Please keep monitoring your vitals. How are you feeling otherwise?";
       }
-      
+
       setPatientChatLog(prev => [...prev, { sender: 'doctor', text: response }]);
       setPatientLoading(false);
     }, 1000);
@@ -1121,8 +1124,8 @@ export default function App() {
     const inputs = newStep.inputs.split(',').map(x => x.trim()).filter(Boolean);
     const outputs = newStep.outputs.split(',').map(x => x.trim()).filter(Boolean);
     const deps = newStep.dependencies.split(',').map(x => x.trim()).filter(Boolean);
-    const sid = `step_${uuid4().slice(0,4)}`;
-    
+    const sid = `step_${uuid4().slice(0, 4)}`;
+
     const updated = [...steps, { id: sid, name: newStep.name, inputs, outputs, dependencies: deps }];
     setSteps(updated);
     setNewStep({ name: '', inputs: '', outputs: '', dependencies: '' });
@@ -1164,7 +1167,7 @@ ${file.content || ''}
             Secure, configuration-driven clinical twin and telemedicine chat proxy.
           </p>
         </div>
-        
+
         <div className="landing-grid">
           {/* Card 1: Doctor */}
           <div className="landing-card" onClick={() => setUserRole('doctor')}>
@@ -1176,7 +1179,7 @@ ${file.content || ''}
               Manage expert twin configurations, review LangGraph agent telemetry, compile Obsidian knowledge vault files, and audit zero-trust security rule bounds.
             </p>
           </div>
-          
+
           {/* Card 2: Patient */}
           <div className="landing-card" onClick={() => {
             setUserRole('patient');
@@ -1187,11 +1190,11 @@ ${file.content || ''}
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ conversation_id: uuid4(), config_id: cid })
               })
-              .then(res => res.ok ? res.json() : null)
-              .then(data => {
-                if (data) setPatientSessionId(data.session_id);
-              })
-              .catch(err => console.error("Auto-init patient session failed:", err));
+                .then(res => res.ok ? res.json() : null)
+                .then(data => {
+                  if (data) setPatientSessionId(data.session_id);
+                })
+                .catch(err => console.error("Auto-init patient session failed:", err));
             }
           }}>
             <div className="landing-card-icon">
@@ -1226,8 +1229,8 @@ ${file.content || ''}
                 <span className="patient-doctor-status">Online • Primary Care</span>
               </div>
             </div>
-            <button 
-              className="btn btn-secondary" 
+            <button
+              className="btn btn-secondary"
               onClick={() => {
                 setUserRole(null);
                 setPatientChatLog([
@@ -1250,7 +1253,7 @@ ${file.content || ''}
                 </div>
               </div>
             ))}
-            
+
             {patientLoading && (
               <div className="patient-message-row received">
                 <div className="patient-bubble" style={{ background: 'var(--bg-tertiary)' }}>
@@ -1266,7 +1269,7 @@ ${file.content || ''}
 
           {/* Footer Input */}
           <div className="patient-chat-footer">
-            <input 
+            <input
               className="patient-input"
               placeholder="Type your message..."
               value={patientChatInput}
@@ -1274,7 +1277,7 @@ ${file.content || ''}
               onKeyDown={e => e.key === 'Enter' && handlePatientSendMessage()}
               disabled={patientLoading}
             />
-            <button 
+            <button
               className="patient-send-btn"
               onClick={handlePatientSendMessage}
               disabled={patientLoading || !patientChatInput.trim()}
@@ -1310,17 +1313,17 @@ ${file.content || ''}
         </div>
 
         <nav style={{ flex: 1 }}>
-          <button 
+          <button
             className={`nav-link w-full ${activeTab === 'workflow' ? 'active' : ''}`}
             onClick={() => setActiveTab('workflow')}
           >
             <Layers size={18} />
             <span>Workflow Config</span>
           </button>
-          
 
 
-          <button 
+
+          <button
             className={`nav-link w-full ${activeTab === 'ingestion' ? 'active' : ''}`}
             onClick={() => setActiveTab('ingestion')}
           >
@@ -1328,7 +1331,7 @@ ${file.content || ''}
             <span>RAG Ingestion Hub</span>
           </button>
 
-          <button 
+          <button
             className={`nav-link w-full ${activeTab === 'obsidian' ? 'active' : ''}`}
             onClick={() => setActiveTab('obsidian')}
           >
@@ -1336,7 +1339,15 @@ ${file.content || ''}
             <span>Obsidian Mapping</span>
           </button>
 
-          <button 
+          <button
+            className={`nav-link w-full ${activeTab === 'pre-consult' ? 'active' : ''}`}
+            onClick={() => setActiveTab('pre-consult')}
+          >
+            <ShieldAlert size={18} />
+            <span>Pre-Consultation</span>
+          </button>
+
+          <button
             className="nav-link w-full"
             onClick={() => setUserRole(null)}
             style={{ marginTop: '24px', color: 'var(--error)' }}
@@ -1361,7 +1372,7 @@ ${file.content || ''}
         {activeTab === 'workflow' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             {/* Feasibility State Banner */}
-            <div className="glass-card" style={{ 
+            <div className="glass-card" style={{
               borderColor: isFeasible ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)',
               background: isFeasible ? 'rgba(16,185,129,0.05)' : 'rgba(239,68,68,0.05)'
             }}>
@@ -1395,19 +1406,19 @@ ${file.content || ''}
                   <h3 style={{ fontSize: '18px' }}>Workflow Steps Layout</h3>
                   <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                     <label style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Auto-pilot</label>
-                    <input 
-                      type="checkbox" 
-                      checked={autopilot} 
-                      onChange={() => setAutopilot(!autopilot)} 
+                    <input
+                      type="checkbox"
+                      checked={autopilot}
+                      onChange={() => setAutopilot(!autopilot)}
                     />
                   </div>
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {steps.map((step, idx) => (
-                    <div key={step.id} style={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
+                    <div key={step.id} style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
                       alignItems: 'center',
                       padding: '16px',
                       background: 'rgba(255,255,255,0.02)',
@@ -1422,7 +1433,7 @@ ${file.content || ''}
                           <span><strong>Depends:</strong> {step.dependencies.join(', ') || 'None'}</span>
                         </div>
                       </div>
-                      <button 
+                      <button
                         onClick={() => deleteStep(step.id)}
                         style={{ background: 'transparent', border: 'none', color: 'var(--error)', cursor: 'pointer' }}
                       >
@@ -1438,38 +1449,38 @@ ${file.content || ''}
                 <h3 style={{ fontSize: '18px' }}>Add Step</h3>
                 <div className="input-group">
                   <span className="input-label">Step Name</span>
-                  <input 
-                    className="form-input" 
-                    placeholder="e.g. Dose Check" 
-                    value={newStep.name} 
-                    onChange={e => setNewStep({...newStep, name: e.target.value})}
+                  <input
+                    className="form-input"
+                    placeholder="e.g. Dose Check"
+                    value={newStep.name}
+                    onChange={e => setNewStep({ ...newStep, name: e.target.value })}
                   />
                 </div>
                 <div className="input-group">
                   <span className="input-label">Inputs (comma separated)</span>
-                  <input 
-                    className="form-input" 
-                    placeholder="e.g. diagnosis_summary" 
-                    value={newStep.inputs} 
-                    onChange={e => setNewStep({...newStep, inputs: e.target.value})}
+                  <input
+                    className="form-input"
+                    placeholder="e.g. diagnosis_summary"
+                    value={newStep.inputs}
+                    onChange={e => setNewStep({ ...newStep, inputs: e.target.value })}
                   />
                 </div>
                 <div className="input-group">
                   <span className="input-label">Outputs (comma separated)</span>
-                  <input 
-                    className="form-input" 
-                    placeholder="e.g. final_dose" 
-                    value={newStep.outputs} 
-                    onChange={e => setNewStep({...newStep, outputs: e.target.value})}
+                  <input
+                    className="form-input"
+                    placeholder="e.g. final_dose"
+                    value={newStep.outputs}
+                    onChange={e => setNewStep({ ...newStep, outputs: e.target.value })}
                   />
                 </div>
                 <div className="input-group">
                   <span className="input-label">Dependencies (step IDs)</span>
-                  <input 
-                    className="form-input" 
-                    placeholder="e.g. step_2" 
-                    value={newStep.dependencies} 
-                    onChange={e => setNewStep({...newStep, dependencies: e.target.value})}
+                  <input
+                    className="form-input"
+                    placeholder="e.g. step_2"
+                    value={newStep.dependencies}
+                    onChange={e => setNewStep({ ...newStep, dependencies: e.target.value })}
                   />
                 </div>
                 <button className="btn btn-primary" onClick={addWorkflowStep}>
@@ -1490,9 +1501,9 @@ ${file.content || ''}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '24px' }}>
             <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <h3 style={{ fontSize: '18px' }}>Ingestion Console</h3>
-              
+
               {/* Drag and Drop Zone */}
-              <div 
+              <div
                 className="upload-zone"
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
@@ -1505,7 +1516,7 @@ ${file.content || ''}
                 <FolderOpen size={32} style={{ color: 'var(--primary)', marginBottom: '12px' }} />
                 <h4 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '4px' }}>Drag & Drop clinical guidelines here</h4>
                 <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>Supports PDF, TXT, MD</p>
-                
+
                 <label className="btn btn-secondary" style={{ cursor: 'pointer' }}>
                   Browse Files
                   <input type="file" accept=".pdf,.txt,.md" style={{ display: 'none' }} onChange={handleFileUpload} disabled={ingesting} />
@@ -1518,7 +1529,7 @@ ${file.content || ''}
                 <div style={{ flex: 1, height: '1px', background: 'var(--border-light)' }}></div>
               </div>
 
-              <textarea 
+              <textarea
                 className="form-input"
                 style={{ flex: 1, minHeight: '180px', fontFamily: 'monospace', fontSize: '13px', resize: 'vertical' }}
                 value={rawText}
@@ -1565,16 +1576,16 @@ ${file.content || ''}
                 <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                   ({obsidianFiles.length} node{obsidianFiles.length !== 1 ? 's' : ''})
                 </span>
-                <button 
-                  onClick={() => handleSyncObsidian(false)} 
-                  className="btn btn-secondary" 
-                  style={{ 
-                    marginLeft: 'auto', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '6px', 
-                    padding: '4px 10px', 
-                    fontSize: '11px', 
+                <button
+                  onClick={() => handleSyncObsidian(false)}
+                  className="btn btn-secondary"
+                  style={{
+                    marginLeft: 'auto',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '4px 10px',
+                    fontSize: '11px',
                     height: '26px',
                     borderColor: 'var(--primary)',
                     color: 'var(--primary)'
@@ -1603,12 +1614,12 @@ ${file.content || ''}
                     {selectedObsidianFile ? selectedObsidianFile.path : 'Select a node'}
                   </h3>
                 </div>
-                <div style={{ 
-                  flex: 1, 
-                  padding: '20px', 
-                  overflowY: 'auto', 
-                  fontFamily: 'monospace', 
-                  fontSize: '13px', 
+                <div style={{
+                  flex: 1,
+                  padding: '20px',
+                  overflowY: 'auto',
+                  fontFamily: 'monospace',
+                  fontSize: '13px',
                   lineHeight: '1.6',
                   background: selectedObsidianFile?.quarantine_status ? 'rgba(255,50,50,0.02)' : 'transparent'
                 }}>
@@ -1640,7 +1651,7 @@ ${file.content || ''}
               {/* Mom-Child Unlearning panel */}
               <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <h3 style={{ fontSize: '18px', color: 'var(--error)' }}>Retract Knowledge</h3>
-                
+
                 {unlearnStep === 0 && (
                   <>
                     <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
@@ -1648,17 +1659,17 @@ ${file.content || ''}
                     </p>
                     <div className="input-group">
                       <span className="input-label">Target Node ID</span>
-                      <input 
-                        className="form-input" 
-                        placeholder="UUID" 
+                      <input
+                        className="form-input"
+                        placeholder="UUID"
                         value={unlearnNodeInput}
                         onChange={e => setUnlearnNodeInput(e.target.value)}
                       />
                     </div>
                     <div className="input-group">
                       <span className="input-label">Retraction Rationale</span>
-                      <textarea 
-                        className="form-input" 
+                      <textarea
+                        className="form-input"
                         style={{ minHeight: '80px' }}
                         value={unlearnRationale}
                         onChange={e => setUnlearnRationale(e.target.value)}
@@ -1693,19 +1704,19 @@ ${file.content || ''}
                 {unlearnStep > 0 && unlearnStep < 4 && (
                   <div style={{ background: 'rgba(255,50,50,0.1)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,50,50,0.2)' }}>
                     <h4 style={{ color: 'var(--error)', marginBottom: '12px' }}>Confirmation Step {unlearnStep} of 3</h4>
-                    
+
                     {unlearnStep === 1 && (
                       <p style={{ fontSize: '14px', marginBottom: '16px' }}>
                         Are you sure you want to retract this node? This action will remove it from the knowledge graph.
                       </p>
                     )}
-                    
+
                     {unlearnStep === 2 && (
                       <p style={{ fontSize: '14px', marginBottom: '16px' }}>
                         WARNING: This node belongs to the <strong>'{unlearnTargetNode?.parent_path || 'Root'}'</strong> sub-tree. Retracting it may impact dependent knowledge pathways. Proceed?
                       </p>
                     )}
-                    
+
                     {unlearnStep === 3 && (
                       <p style={{ fontSize: '14px', marginBottom: '16px', fontWeight: 'bold' }}>
                         FINAL CONFIRMATION: Are you absolutely certain you want to permanently tombstone this node's vector embedding?
@@ -1742,8 +1753,8 @@ ${file.content || ''}
             {/* Input sandbox */}
             <div>
               <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
-                <input 
-                  className="form-input" 
+                <input
+                  className="form-input"
                   style={{ flex: 1 }}
                   placeholder="Test a symptom query..."
                   value={userQuery}
@@ -1760,12 +1771,12 @@ ${file.content || ''}
               </div>
 
               {/* Logs */}
-              <div style={{ 
-                height: '180px', 
-                overflowY: 'auto', 
-                border: '1px solid var(--border-light)', 
-                borderRadius: '8px', 
-                padding: '12px', 
+              <div style={{
+                height: '180px',
+                overflowY: 'auto',
+                border: '1px solid var(--border-light)',
+                borderRadius: '8px',
+                padding: '12px',
                 background: 'rgba(0,0,0,0.3)',
                 fontFamily: 'monospace',
                 fontSize: '12px',
@@ -1778,10 +1789,10 @@ ${file.content || ''}
                 ) : (
                   sandboxLog.map((log, i) => (
                     <div key={i}>
-                      <span style={{ 
-                        color: log.node === 'human_intercept' ? 'var(--error)' : 
-                               log.node === 'action_dispatch' ? 'var(--success)' : 'var(--secondary)',
-                        fontWeight: 700 
+                      <span style={{
+                        color: log.node === 'human_intercept' ? 'var(--error)' :
+                          log.node === 'action_dispatch' ? 'var(--success)' : 'var(--secondary)',
+                        fontWeight: 700
                       }}>[{log.node.toUpperCase()}]</span> {log.msg}
                     </div>
                   ))
@@ -1798,13 +1809,13 @@ ${file.content || ''}
                     <div><strong>Session ID:</strong> {activeSessionState.session_id.slice(0, 8)}...</div>
                     <div><strong>Active Node:</strong> {activeSessionState.current_node}</div>
                     <div>
-                      <strong>Requires Human:</strong> 
+                      <strong>Requires Human:</strong>
                       <span style={{ marginLeft: '6px', color: activeSessionState.requires_review ? 'var(--error)' : 'var(--success)', fontWeight: 600 }}>
                         {activeSessionState.requires_review ? 'YES' : 'NO'}
                       </span>
                     </div>
                     <div>
-                      <strong>State Paused:</strong> 
+                      <strong>State Paused:</strong>
                       <span style={{ marginLeft: '6px', color: activeSessionState.is_paused ? 'var(--error)' : 'var(--success)', fontWeight: 600 }}>
                         {activeSessionState.is_paused ? 'YES' : 'NO'}
                       </span>
@@ -1823,6 +1834,14 @@ ${file.content || ''}
             </div>
           </div>
         </section>
+
+        {/* PRE-CONSULTATION TAB */}
+        {activeTab === 'pre-consult' && (
+          <div style={{ marginTop: '20px' }}>
+            <PreConsultation />
+          </div>
+        )}
+
       </main>
     </div>
   );

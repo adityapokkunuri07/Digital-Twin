@@ -3,10 +3,12 @@ from backend.app.repositories.supabase_config_repo import SupabaseConfigReposito
 from backend.app.repositories.supabase_knowledge_repo import SupabaseKnowledgeRepository
 from backend.app.repositories.supabase_cot_repo import SupabaseCotRepository
 from backend.app.repositories.supabase_session_repo import SupabaseSessionRepository
+from backend.app.repositories.supabase_preconsult_repo import SupabasePreConsultRepository
 
 __all__ = [
     "SupabaseConfigRepository",
     "SupabaseKnowledgeRepository",
     "SupabaseCotRepository",
     "SupabaseSessionRepository",
+    "SupabasePreConsultRepository",
 ]

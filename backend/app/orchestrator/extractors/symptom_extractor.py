@@ -20,11 +20,17 @@ class SymptomExtractor(DataExtractor):
     _CHEST_PAIN_PATTERN = re.compile(
         r'(?:chest pain|chest tightness|pain in chest)'
     )
+    _VISION_PATTERN = re.compile(
+        r'(?:vision change|blurry vision|blind spot|vision loss)'
+    )
 
     def extract(self, text: str) -> Dict[str, Any]:
         extracted: Dict[str, Any] = {}
 
         if self._CHEST_PAIN_PATTERN.search(text):
             extracted["chest_pain"] = True
+
+        if self._VISION_PATTERN.search(text):
+            extracted["vision_changes"] = True
 
         return extracted

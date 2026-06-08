@@ -19,6 +19,7 @@ from backend.app.core.interfaces.repositories import (
     KnowledgeRepository,
     CotRepository,
     SessionRepository,
+    PreConsultRepository,
 )
 from backend.app.core.interfaces.embedding import EmbeddingService
 from backend.app.core.interfaces.export import ExportService
@@ -28,6 +29,7 @@ from backend.app.repositories.supabase_config_repo import SupabaseConfigReposito
 from backend.app.repositories.supabase_knowledge_repo import SupabaseKnowledgeRepository
 from backend.app.repositories.supabase_cot_repo import SupabaseCotRepository
 from backend.app.repositories.supabase_session_repo import SupabaseSessionRepository
+from backend.app.repositories.supabase_preconsult_repo import SupabasePreConsultRepository
 from backend.app.services.embedding.gemini_embedder import GeminiEmbeddingService
 from backend.app.services.export.obsidian_export import ObsidianExportService
 
@@ -36,6 +38,7 @@ from backend.app.services.config_service import ConfigService
 from backend.app.services.unlearning_service import UnlearningService
 from backend.app.services.ingestion_service import StructuralRAGIngestionPipeline
 from backend.app.services.hybrid_rag_service import HybridRAGEngine
+from backend.app.services.preconsult_service import PreConsultationService
 from backend.app.orchestrator.state_machine import ZeroTrustOrchestrator
 
 # Extractors & Safety Rules
@@ -71,6 +74,7 @@ class ServiceProvider:
         self._knowledge_repo: KnowledgeRepository | None = None
         self._cot_repo: CotRepository | None = None
         self._session_repo: SessionRepository | None = None
+        self._preconsult_repo: PreConsultRepository | None = None
 
         # Service singletons
         self._embedding_service: EmbeddingService | None = None
@@ -80,6 +84,7 @@ class ServiceProvider:
         self._unlearning_service: UnlearningService | None = None
         self._ingestion_pipeline: StructuralRAGIngestionPipeline | None = None
         self._orchestrator: ZeroTrustOrchestrator | None = None
+        self._preconsult_service: PreConsultationService | None = None
 
         # Pluggable extractors and safety rules
         self._extractors: List[DataExtractor] | None = None
@@ -106,6 +111,9 @@ class ServiceProvider:
             settings.SUPABASE_URL, settings.SUPABASE_KEY
         )
         self._session_repo = SupabaseSessionRepository(
+            settings.SUPABASE_URL, settings.SUPABASE_KEY
+        )
+        self._preconsult_repo = SupabasePreConsultRepository(
             settings.SUPABASE_URL, settings.SUPABASE_KEY
         )
 
@@ -148,6 +156,13 @@ class ServiceProvider:
             extractors=self._extractors,
             safety_rules=self._safety_rules,
         )
+        self._orchestrator.set_preconsult_dependencies(self._preconsult_repo, self._embedding_service)
+
+        self._preconsult_service = PreConsultationService(
+            preconsult_repo=self._preconsult_repo,
+            safety_rules=self._safety_rules,
+            langgraph_orchestrator=self._orchestrator
+        )
 
         self._initialized = True
         logger.info("ServiceProvider initialization complete.")
@@ -169,6 +184,10 @@ class ServiceProvider:
     @property
     def session_repo(self) -> SessionRepository:
         return self._session_repo
+
+    @property
+    def preconsult_repo(self) -> PreConsultRepository:
+        return self._preconsult_repo
 
     @property
     def embedding_service(self) -> EmbeddingService:
@@ -197,6 +216,10 @@ class ServiceProvider:
     @property
     def orchestrator(self) -> ZeroTrustOrchestrator:
         return self._orchestrator
+
+    @property
+    def preconsult_service(self) -> PreConsultationService:
+        return self._preconsult_service
 
 
 # --- Module-level singleton ---
@@ -249,3 +272,7 @@ def get_ingestion_pipeline() -> StructuralRAGIngestionPipeline:
 
 def get_orchestrator() -> ZeroTrustOrchestrator:
     return provider.orchestrator
+
+def get_preconsult_service() -> PreConsultationService:
+    return provider.preconsult_service
+
