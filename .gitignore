@@ -1,9 +1,26 @@
-# General
+# ──────────────────────────────────────────────
+# General / OS
+# ──────────────────────────────────────────────
 .DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+
+# ──────────────────────────────────────────────
+# Editors & IDEs
+# ──────────────────────────────────────────────
 .vscode/
 .idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
 
+# ──────────────────────────────────────────────
 # Environment Variables & Secrets
+# ──────────────────────────────────────────────
 .env
 .env.*
 !.env.example
@@ -11,20 +28,64 @@
 *.key
 credentials.json
 secrets.json
+service_account*.json
 
+# ──────────────────────────────────────────────
 # Python / Backend
+# ──────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
 venv/
 env/
 .venv/
-.coverage
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
 
+# ──────────────────────────────────────────────
 # Node / Frontend
+# ──────────────────────────────────────────────
 node_modules/
 dist/
 dist-ssr/
+*.local
 npm-debug.log*
+yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.eslintcache
+.parcel-cache/
+
+# ──────────────────────────────────────────────
+# Testing / Scratch / Temporary
+# ──────────────────────────────────────────────
+test_crash.py
+test_*.log
+*.tmp
+*.bak
+
+# ──────────────────────────────────────────────
+# Logs & Databases
+# ──────────────────────────────────────────────
+logs/
+*.log
+*.sqlite3
+*.db
+
+# ──────────────────────────────────────────────
+# Docker (if used later)
+# ──────────────────────────────────────────────
+docker-compose.override.yml
