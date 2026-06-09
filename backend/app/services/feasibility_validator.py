@@ -23,6 +23,13 @@ class FeasibilityValidator:
         # 2. Cycle Detection (Topological Sort / DFS)
         visited = {} # state: 0 = unvisited, 1 = visiting, 2 = visited
         
+        NODE_PHASE_ORDER = {
+            "data_gathering": 1,
+            "processing": 2,
+            "human_intercept": 3,
+            "action_dispatch": 4
+        }
+        
         def has_cycle(step_id: str) -> bool:
             if step_id not in visited:
                 return False
@@ -33,10 +40,18 @@ class FeasibilityValidator:
 
             visited[step_id] = 1
             step = step_map.get(step_id, {})
+            step_phase = NODE_PHASE_ORDER.get(step.get("node_type", "processing"), 2)
+            
             for dep_id in step.get("dependencies", []):
-                if dep_id not in step_map:
+                dep_step = step_map.get(dep_id)
+                if not dep_step:
                     errors.append(f"Validation Error: Step '{step_id}' depends on non-existent step '{dep_id}'.")
                     continue
+                    
+                dep_phase = NODE_PHASE_ORDER.get(dep_step.get("node_type", "processing"), 2)
+                if step_phase < dep_phase:
+                    errors.append(f"Validation Error: Phase mismatch. Step '{step_id}' ({step.get('node_type', 'processing')}) cannot depend on step '{dep_id}' ({dep_step.get('node_type', 'processing')}) because it executes earlier in the Zero-Trust lifecycle.")
+                    
                 if has_cycle(dep_id):
                     return True
             

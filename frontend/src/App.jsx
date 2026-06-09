@@ -565,12 +565,12 @@ export default function App() {
 
   // --- Workflow Configurator State ---
   const [steps, setSteps] = useState(() => loadState('steps', [
-    { id: "step_1", name: "Intake", inputs: [], outputs: ["symptoms", "temperature"], dependencies: [] },
-    { id: "step_2", name: "Diagnosis Gate", inputs: ["symptoms", "temperature"], outputs: ["is_severe", "diagnosis_summary"], dependencies: ["step_1"] },
-    { id: "step_3", name: "Action Escalator", inputs: ["is_severe", "diagnosis_summary"], outputs: ["escalation_done"], dependencies: ["step_2"] }
+    { id: "step_1", name: "Intake", inputs: [], outputs: ["symptoms", "temperature"], dependencies: [], node_type: "data_gathering" },
+    { id: "step_2", name: "Diagnosis Gate", inputs: ["symptoms", "temperature"], outputs: ["is_severe", "diagnosis_summary"], dependencies: ["step_1"], node_type: "processing" },
+    { id: "step_3", name: "Action Escalator", inputs: ["is_severe", "diagnosis_summary"], outputs: ["escalation_done"], dependencies: ["step_2"], node_type: "action_dispatch" }
   ]));
   const [autopilot, setAutopilot] = useState(() => loadState('autopilot', true));
-  const [newStep, setNewStep] = useState({ name: '', inputs: '', outputs: '', dependencies: '' });
+  const [newStep, setNewStep] = useState({ name: '', inputs: '', outputs: '', dependencies: '', node_type: 'processing' });
 
   const [chatInput, setChatInput] = useState('');
 
@@ -1152,9 +1152,9 @@ export default function App() {
     });
     const sid = maxId > 0 ? `step_${maxId + 1}` : `step_${steps.length + 1}`;
 
-    const updated = [...steps, { id: sid, name: newStep.name, inputs, outputs, dependencies: deps }];
+    const updated = [...steps, { id: sid, name: newStep.name, inputs, outputs, dependencies: deps, node_type: newStep.node_type }];
     setSteps(updated);
-    setNewStep({ name: '', inputs: '', outputs: '', dependencies: '' });
+    setNewStep({ name: '', inputs: '', outputs: '', dependencies: '', node_type: 'processing' });
     handleValidateConfig(updated);
   };
 
@@ -1391,7 +1391,29 @@ ${file.content || ''}
                       borderRadius: '8px'
                     }}>
                       <div>
-                        <h4 style={{ fontWeight: 600 }}>{idx + 1}. {step.name} <span style={{fontSize: '13px', fontWeight: 400, color: 'var(--text-muted)'}}>({step.id})</span></h4>
+                        <h4 style={{ fontWeight: 600 }}>
+                          {idx + 1}. {step.name} <span style={{fontSize: '13px', fontWeight: 400, color: 'var(--text-muted)'}}>({step.id})</span>
+                          <span style={{
+                            marginLeft: '8px',
+                            padding: '2px 8px',
+                            borderRadius: '12px',
+                            fontSize: '10px',
+                            fontWeight: 'bold',
+                            backgroundColor: step.node_type === 'data_gathering' ? 'rgba(59, 130, 246, 0.2)' : 
+                                           step.node_type === 'processing' ? 'rgba(16, 185, 129, 0.2)' :
+                                           step.node_type === 'human_intercept' ? 'rgba(239, 68, 68, 0.2)' :
+                                           'rgba(245, 158, 11, 0.2)',
+                            color: step.node_type === 'data_gathering' ? '#60a5fa' :
+                                   step.node_type === 'processing' ? '#34d399' :
+                                   step.node_type === 'human_intercept' ? '#f87171' :
+                                   '#fbbf24'
+                          }}>
+                            {step.node_type === 'data_gathering' ? 'DATA GATHERING' : 
+                             step.node_type === 'processing' ? 'PROCESSING' : 
+                             step.node_type === 'human_intercept' ? 'HUMAN INTERCEPT' : 
+                             'ACTION DISPATCH'}
+                          </span>
+                        </h4>
                         <div style={{ display: 'flex', gap: '16px', fontSize: '12px', marginTop: '6px', color: 'var(--text-secondary)' }}>
                           <span><strong>Inputs:</strong> {step.inputs.join(', ') || 'None'}</span>
                           <span><strong>Outputs:</strong> {step.outputs.join(', ') || 'None'}</span>
@@ -1448,6 +1470,20 @@ ${file.content || ''}
                     value={newStep.name}
                     onChange={e => setNewStep({ ...newStep, name: e.target.value })}
                   />
+                </div>
+                <div className="input-group">
+                  <span className="input-label">Execution Phase</span>
+                  <select
+                    className="form-input"
+                    value={newStep.node_type}
+                    onChange={e => setNewStep({ ...newStep, node_type: e.target.value })}
+                    style={{ background: 'var(--bg-card)', color: 'var(--text-primary)', cursor: 'pointer' }}
+                  >
+                    <option value="data_gathering">Data Gathering</option>
+                    <option value="processing">Processing</option>
+                    <option value="human_intercept">Human Intercept (Safety)</option>
+                    <option value="action_dispatch">Action Dispatch</option>
+                  </select>
                 </div>
                 <div className="input-group">
                   <span className="input-label">Inputs (comma separated)</span>

@@ -16,6 +16,7 @@ import logging
 
 from backend.app.core.interfaces.repositories import ConfigRepository, SessionRepository
 from backend.app.services.hybrid_rag_service import HybridRAGEngine
+from backend.app.services.llm.gemini_llm import GeminiLLMService
 from backend.app.orchestrator.extractors.base import DataExtractor
 from backend.app.orchestrator.safety_rules.base import SafetyRule
 from backend.app.core.interfaces.embedding import EmbeddingService
@@ -151,12 +152,14 @@ class ZeroTrustOrchestrator:
         config_repo: ConfigRepository,
         session_repo: SessionRepository,
         rag_engine: HybridRAGEngine,
+        llm_service: GeminiLLMService | None = None,
         extractors: List[DataExtractor] | None = None,
         safety_rules: List[SafetyRule] | None = None,
     ):
         self._config_repo = config_repo
         self._session_repo = session_repo
         self._rag_engine = rag_engine
+        self._llm_service = llm_service
         self._extractors = extractors or []
         self._safety_rules = safety_rules or []
         self._embedding_service: EmbeddingService | None = None
@@ -246,37 +249,50 @@ class ZeroTrustOrchestrator:
         workflow_config = config_record.get("workflow_config", {}) if config_record else {}
         steps = workflow_config.get("steps", [])
 
-        # Collect all required inputs from workflow config
-        all_required_inputs = list(set(
+        # Identify root inputs (inputs not produced by any other step)
+        all_outputs = set(
+            out
+            for step in steps
+            for out in step.get("outputs", [])
+        )
+        
+        root_inputs = list(set(
             inp
             for step in steps
             for inp in step.get("inputs", [])
+            if inp not in all_outputs
         ))
 
         # Calculate what was missing before this turn
-        missing_before = [
-            x for x in all_required_inputs
+        missing_root_before = [
+            x for x in root_inputs
             if x not in state["gathered_data"]
         ]
 
-        # 3. Node 1: Data Gathering — run all injected extractors
+        # 3. Node 1: Data Gathering — run all injected extractors AND dynamic LLM
         text = user_query.lower()
         extracted_any = False
+        
+        # Fast fallback extractors
         for extractor in self._extractors:
             extracted = extractor.extract(text)
             if extracted:
                 extracted_any = True
             state["gathered_data"].update(extracted)
 
+        # Dynamic LLM Extractor
+        if self._llm_service and missing_root_before:
+            dynamic_extracted = self._llm_service.extract_variables(user_query, missing_root_before)
+            if dynamic_extracted:
+                extracted_any = True
+                state["gathered_data"].update(dynamic_extracted)
+
         # Anti-looping fallback for dummy extractors:
-        # If the user replied but the regex extractors failed to catch anything,
-        # we force-fill the current active question group with dummy data so it advances.
-        if missing_before and not extracted_any:
+        if missing_root_before and not extracted_any:
             for group in _QUESTION_GROUPS:
-                group_missing = [v for v in group["vars"] if v in missing_before]
+                group_missing = [v for v in group["vars"] if v in missing_root_before]
                 if group_missing:
                     for var in group_missing:
-                        # Provide type-safe dummy values to avoid crashing safety rules
                         if "temperature" in var:
                             state["gathered_data"][var] = 98.6
                         elif "blood_pressure" in var:
@@ -287,27 +303,77 @@ class ZeroTrustOrchestrator:
                             state["gathered_data"][var] = "Patient Answered"
                     break
 
-        # Check if we're still missing required variables
-        missing_inputs = [
-            x for x in all_required_inputs
+        # Helper to dynamically evaluate steps assigned to a specific phase
+        def evaluate_phase_steps(phase_name: str, eval_context: str = "") -> bool:
+            if not self._llm_service or self._llm_service.use_fallback:
+                return False
+                
+            evaluated_any_in_phase = False
+            evaluated_any_in_loop = True
+            while evaluated_any_in_loop:
+                evaluated_any_in_loop = False
+                for step in steps:
+                    if step.get("node_type", "processing") != phase_name:
+                        continue
+                    
+                    inputs = step.get("inputs", [])
+                    outputs = step.get("outputs", [])
+                    if not outputs:
+                        continue
+                    
+                    missing_outputs = [o for o in outputs if o not in state["gathered_data"]]
+                    if not missing_outputs:
+                        continue
+                        
+                    missing_step_inputs = [i for i in inputs if i not in state["gathered_data"]]
+                    if not missing_step_inputs:
+                        step_inputs_data = {k: state["gathered_data"][k] for k in inputs}
+                        result = self._llm_service.evaluate_step(
+                            step.get("name", "Unknown Step"), 
+                            step_inputs_data, 
+                            missing_outputs, 
+                            context=eval_context
+                        )
+                        if result:
+                            state["gathered_data"].update(result)
+                            evaluated_any_in_loop = True
+                            evaluated_any_in_phase = True
+            return evaluated_any_in_phase
+
+        # PHASE 1: DATA GATHERING NODE
+        evaluate_phase_steps("data_gathering")
+
+        # Check if we're still missing root variables
+        missing_root_inputs = [
+            x for x in root_inputs
             if x not in state["gathered_data"]
         ]
 
         selected_chunks = []
 
-        if missing_inputs:
+        if missing_root_inputs:
             # Stay in data gathering loop
             state["current_node"] = "data_gathering"
-            state["output_message"] = _build_doctor_followup(
-                missing_inputs, state["gathered_data"]
-            )
+            
+            # Dynamic Question Generation
+            if self._llm_service and not self._llm_service.use_fallback:
+                state["output_message"] = self._llm_service.generate_followup(
+                    missing_root_inputs, state["gathered_data"]
+                )
+            else:
+                state["output_message"] = _build_doctor_followup(
+                    missing_root_inputs, state["gathered_data"]
+                )
         else:
-            # 4. Node 2: Data Processing — Hybrid RAG context retrieval
+            # Context Retrieval via Hybrid RAG
             context, selected_chunks, rejected = await self._rag_engine.retrieve_context(
                 config_id, user_query,
             )
             state["retrieved_context"] = context
+            
+            # PHASE 2: PROCESSING NODE
             state["current_node"] = "processing"
+            evaluate_phase_steps("processing", eval_context=context)
 
             # Get classification score from top chunk
             top_score = (
@@ -315,7 +381,10 @@ class ZeroTrustOrchestrator:
             )
             state["classification_score"] = top_score
 
-            # 5. Node 3: Run all injected safety rules
+            # PHASE 3: HUMAN INTERCEPT NODE
+            evaluate_phase_steps("human_intercept", eval_context=context)
+
+            # Check Hardcoded Safety Rules
             anomaly_reasons = []
             for rule in self._safety_rules:
                 is_anomaly, reason = rule.evaluate(
@@ -323,6 +392,14 @@ class ZeroTrustOrchestrator:
                 )
                 if is_anomaly:
                     anomaly_reasons.append(reason)
+                    
+            # Check Dynamic Safety Rules (from workflow configuration)
+            for step in steps:
+                if step.get("node_type", "processing") == "human_intercept":
+                    for output_var in step.get("outputs", []):
+                        val = str(state["gathered_data"].get(output_var, "")).lower()
+                        if val in ["high", "severe", "critical", "true", "escalate", "yes"]:
+                            anomaly_reasons.append(f"Dynamic Rule '{step.get('name')}' output '{output_var}' flagged as '{val}'")
 
             if anomaly_reasons:
                 # Human Intercept — freeze thread
@@ -341,8 +418,9 @@ class ZeroTrustOrchestrator:
                     f"experiencing severe symptoms, please call emergency services (112) immediately."
                 )
             else:
-                # 6. Node 4: Action Dispatch
+                # PHASE 4: ACTION DISPATCH NODE
                 state["current_node"] = "action_dispatch"
+                evaluate_phase_steps("action_dispatch", eval_context=context)
 
                 # Build a doctor-like assessment summary
                 gathered = state["gathered_data"]
