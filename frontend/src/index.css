@@ -818,3 +818,7 @@ h1, h2, h3, h4, h5, h6 {
 .animate-pulse-ring {
   animation: pulse-ring 2s infinite cubic-bezier(0.66, 0, 0, 1);
 }
+
+/* Fix for native select dropdown options styling */
+.form-input { font-family: inherit !important; }
+select.form-input option { background-color: #2C2C2E; color: #FFFFFF; font-family: inherit; padding: 12px; }

@@ -32,6 +32,7 @@ from backend.app.repositories.supabase_session_repo import SupabaseSessionReposi
 from backend.app.repositories.supabase_preconsult_repo import SupabasePreConsultRepository
 from backend.app.services.embedding.gemini_embedder import GeminiEmbeddingService
 from backend.app.services.export.obsidian_export import ObsidianExportService
+from backend.app.services.llm.gemini_llm import GeminiLLMService
 
 # Services
 from backend.app.services.config_service import ConfigService
@@ -78,6 +79,7 @@ class ServiceProvider:
 
         # Service singletons
         self._embedding_service: EmbeddingService | None = None
+        self._llm_service: GeminiLLMService | None = None
         self._export_service: ExportService | None = None
         self._rag_engine: HybridRAGEngine | None = None
         self._config_service: ConfigService | None = None
@@ -121,6 +123,9 @@ class ServiceProvider:
         self._embedding_service = GeminiEmbeddingService(
             settings.GEMINI_API_KEY
         )
+        self._llm_service = GeminiLLMService(
+            settings.GEMINI_API_KEY
+        )
         self._export_service = ObsidianExportService(settings.OBSIDIAN_VAULT_PATH)
 
         # 3. Pluggable extractors (Open/Closed — add new ones here)
@@ -153,6 +158,7 @@ class ServiceProvider:
             config_repo=self._config_repo,
             session_repo=self._session_repo,
             rag_engine=self._rag_engine,
+            llm_service=self._llm_service,
             extractors=self._extractors,
             safety_rules=self._safety_rules,
         )
@@ -192,6 +198,10 @@ class ServiceProvider:
     @property
     def embedding_service(self) -> EmbeddingService:
         return self._embedding_service
+
+    @property
+    def llm_service(self) -> GeminiLLMService:
+        return self._llm_service
 
     @property
     def export_service(self) -> ExportService:
@@ -247,6 +257,10 @@ def get_session_repo() -> SessionRepository:
 
 def get_embedding_service() -> EmbeddingService:
     return provider.embedding_service
+
+
+def get_llm_service() -> GeminiLLMService:
+    return provider.llm_service
 
 
 def get_export_service() -> ExportService:

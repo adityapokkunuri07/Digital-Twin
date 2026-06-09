@@ -564,11 +564,13 @@ export default function App() {
   const [apiStatus, setApiStatus] = useState('offline'); // always re-probe on load
 
   // --- Workflow Configurator State ---
-  const [steps, setSteps] = useState(() => loadState('steps', []));
-  const [configLoading, setConfigLoading] = useState(false);
+  const [steps, setSteps] = useState(() => loadState('steps', [
+    { id: "step_1", name: "Intake", inputs: [], outputs: ["symptoms", "temperature"], dependencies: [], node_type: "data_gathering" },
+    { id: "step_2", name: "Diagnosis Gate", inputs: ["symptoms", "temperature"], outputs: ["is_severe", "diagnosis_summary"], dependencies: ["step_1"], node_type: "processing" },
+    { id: "step_3", name: "Action Escalator", inputs: ["is_severe", "diagnosis_summary"], outputs: ["escalation_done"], dependencies: ["step_2"], node_type: "action_dispatch" }
+  ]));
   const [autopilot, setAutopilot] = useState(() => loadState('autopilot', true));
-  const [newStep, setNewStep] = useState({ name: '', inputs: '', outputs: '', dependencies: '' });
-  const [newTasks, setNewTasks] = useState([]); // batch task inputs for workflow
+  const [newStep, setNewStep] = useState({ name: '', inputs: '', outputs: '', dependencies: '', node_type: 'processing' });
 
   const [chatInput, setChatInput] = useState('');
 
@@ -1184,9 +1186,9 @@ export default function App() {
     });
     const sid = maxId > 0 ? `step_${maxId + 1}` : `step_${steps.length + 1}`;
 
-    const updated = [...steps, { id: sid, name: newStep.name, inputs, outputs, dependencies: deps }];
+    const updated = [...steps, { id: sid, name: newStep.name, inputs, outputs, dependencies: deps, node_type: newStep.node_type }];
     setSteps(updated);
-    setNewStep({ name: '', inputs: '', outputs: '', dependencies: '' });
+    setNewStep({ name: '', inputs: '', outputs: '', dependencies: '', node_type: 'processing' });
     handleValidateConfig(updated);
   };
 
@@ -1204,16 +1206,16 @@ export default function App() {
 
   const addAllTasks = () => {
     if (!newTasks || newTasks.length === 0) return;
-    
+
     let currentSteps = [...steps];
     const created = [];
-    
+
     newTasks.forEach(t => {
       if (!t.name) return;
       const inputs = (t.inputs || '').split(',').map(x => x.trim()).filter(Boolean);
       const outputs = (t.outputs || '').split(',').map(x => x.trim()).filter(Boolean);
       const deps = (t.dependencies || '').split(',').map(x => x.trim().replace(/\s+/g, '_')).filter(Boolean);
-      
+
       let maxId = 0;
       const allTempSteps = [...currentSteps, ...created];
       allTempSteps.forEach(s => {
@@ -1223,7 +1225,7 @@ export default function App() {
         }
       });
       const sid = maxId > 0 ? `step_${maxId + 1}` : `step_${allTempSteps.length + 1}`;
-      
+
       created.push({ id: sid, name: t.name, inputs, outputs, dependencies: deps });
     });
 
@@ -1457,55 +1459,54 @@ ${file.content || ''}
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {configLoading ? (
-                    <div style={{
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                      padding: '48px 20px', color: 'var(--text-muted)', gap: '12px'
+                  {steps.map((step, idx) => (
+                    <div key={step.id} style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '16px',
+                      background: 'rgba(255,255,255,0.02)',
+                      border: '1px solid var(--border-light)',
+                      borderRadius: '8px'
                     }}>
-                      <RefreshCw size={28} className="animate-pulse-slow" style={{ color: 'var(--primary)' }} />
-                      <span style={{ fontSize: '14px' }}>Loading workflow from database…</span>
-                    </div>
-                  ) : steps.length === 0 ? (
-                    <div style={{
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                      padding: '48px 20px', color: 'var(--text-muted)', gap: '12px',
-                      border: '1px dashed var(--border-light)', borderRadius: '12px',
-                      background: 'rgba(255,255,255,0.01)'
-                    }}>
-                      <Layers size={32} style={{ opacity: 0.3 }} />
-                      <span style={{ fontSize: '14px', textAlign: 'center' }}>No workflow steps configured yet.</span>
-                      <span style={{ fontSize: '12px', textAlign: 'center', maxWidth: '300px' }}>
-                        Use the <strong>Add Step</strong> panel on the right to build your workflow, or <strong>Save Config</strong> after adding steps.
-                      </span>
-                    </div>
-                  ) : (
-                    steps.map((step, idx) => (
-                      <div key={step.id} style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '16px',
-                        background: 'rgba(255,255,255,0.02)',
-                        border: '1px solid var(--border-light)',
-                        borderRadius: '8px'
-                      }}>
-                        <div>
-                          <h4 style={{ fontWeight: 600 }}>{idx + 1}. {step.name} <span style={{ fontSize: '13px', fontWeight: 400, color: 'var(--text-muted)' }}>({step.id})</span></h4>
-                          <div style={{ display: 'flex', gap: '16px', fontSize: '12px', marginTop: '6px', color: 'var(--text-secondary)' }}>
-                            <span><strong>Inputs:</strong> {step.inputs.join(', ') || 'None'}</span>
-                            <span><strong>Outputs:</strong> {step.outputs.join(', ') || 'None'}</span>
-                            <span><strong>Depends:</strong> {step.dependencies.join(', ') || 'None'}</span>
-                          </div>
+                      <div>
+                        <h4 style={{ fontWeight: 600 }}>
+                          {idx + 1}. {step.name} <span style={{ fontSize: '13px', fontWeight: 400, color: 'var(--text-muted)' }}>({step.id})</span>
+                          <span style={{
+                            marginLeft: '8px',
+                            padding: '2px 8px',
+                            borderRadius: '12px',
+                            fontSize: '10px',
+                            fontWeight: 'bold',
+                            backgroundColor: step.node_type === 'data_gathering' ? 'rgba(59, 130, 246, 0.2)' :
+                              step.node_type === 'processing' ? 'rgba(16, 185, 129, 0.2)' :
+                                step.node_type === 'human_intercept' ? 'rgba(239, 68, 68, 0.2)' :
+                                  'rgba(245, 158, 11, 0.2)',
+                            color: step.node_type === 'data_gathering' ? '#60a5fa' :
+                              step.node_type === 'processing' ? '#34d399' :
+                                step.node_type === 'human_intercept' ? '#f87171' :
+                                  '#fbbf24'
+                          }}>
+                            {step.node_type === 'data_gathering' ? 'DATA GATHERING' :
+                              step.node_type === 'processing' ? 'PROCESSING' :
+                                step.node_type === 'human_intercept' ? 'HUMAN INTERCEPT' :
+                                  'ACTION DISPATCH'}
+                          </span>
+                        </h4>
+                        <div style={{ display: 'flex', gap: '16px', fontSize: '12px', marginTop: '6px', color: 'var(--text-secondary)' }}>
+                          <span><strong>Inputs:</strong> {step.inputs.join(', ') || 'None'}</span>
+                          <span><strong>Outputs:</strong> {step.outputs.join(', ') || 'None'}</span>
+                          <span><strong>Depends:</strong> {step.dependencies.join(', ') || 'None'}</span>
                         </div>
-                        <button
-                          onClick={() => deleteStep(step.id)}
-                          style={{ background: 'transparent', border: 'none', color: 'var(--error)', cursor: 'pointer' }}
-                        >
-                          <Trash2 size={16} />
-                        </button>
                       </div>
-                    ))
-                  )}
+                      <button
+                        onClick={() => deleteStep(step.id)}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--error)', cursor: 'pointer' }}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -1550,6 +1551,20 @@ ${file.content || ''}
                     />
                   </div>
                   <div className="input-group">
+                    <span className="input-label">Execution Phase</span>
+                    <select
+                      className="form-input"
+                      value={newStep.node_type}
+                      onChange={e => setNewStep({ ...newStep, node_type: e.target.value })}
+                      style={{ background: 'var(--bg-card)', color: 'var(--text-primary)', cursor: 'pointer' }}
+                    >
+                      <option value="data_gathering">Data Gathering</option>
+                      <option value="processing">Processing</option>
+                      <option value="human_intercept">Human Intercept (Safety)</option>
+                      <option value="action_dispatch">Action Dispatch</option>
+                    </select>
+                  </div>
+                  <div className="input-group">
                     <span className="input-label">Inputs (comma separated)</span>
                     <input
                       className="form-input"
@@ -1576,36 +1591,12 @@ ${file.content || ''}
                       onChange={e => setNewStep({ ...newStep, dependencies: e.target.value })}
                     />
                   </div>
-                  <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button className="btn btn-primary" onClick={addWorkflowStep} style={{ flex: 1 }}>
-                        Add Step
-                      </button>
-                      <button className="btn btn-accent" onClick={handleSaveConfig} style={{ flex: 1 }}>
-                        Save Config & Compile
-                      </button>
-                    </div>
-
-                    <div style={{ borderTop: '1px dashed var(--border-light)', paddingTop: '10px' }}>
-                      <h4 style={{ margin: '6px 0', fontSize: '14px', fontWeight: 600 }}>Batch Add Tasks</h4>
-                      {newTasks.map((t, i) => (
-                        <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px', border: '1px solid var(--border-light)', padding: '8px', borderRadius: '4px' }}>
-                          <input className="form-input" placeholder="Task name" value={t.name} onChange={e => updateNewTask(i, 'name', e.target.value)} />
-                          <input className="form-input" placeholder="Dependencies (step IDs)" value={t.dependencies} onChange={e => updateNewTask(i, 'dependencies', e.target.value)} />
-                          <input className="form-input" placeholder="Inputs (comma)" value={t.inputs} onChange={e => updateNewTask(i, 'inputs', e.target.value)} />
-                          <input className="form-input" placeholder="Outputs (comma)" value={t.outputs} onChange={e => updateNewTask(i, 'outputs', e.target.value)} />
-                          <div style={{ gridColumn: 'span 2', display: 'flex', justifyContent: 'flex-end' }}>
-                            <button className="btn" onClick={() => removeNewTask(i)} style={{ background: 'transparent', color: 'var(--error)', border: 'none', cursor: 'pointer', fontSize: '12px' }}>Remove</button>
-                          </div>
-                        </div>
-                      ))}
-
-                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                        <button className="btn btn-secondary" onClick={addTaskField} style={{ fontSize: '12px', padding: '6px 12px', flex: 1 }}>Add Task Field</button>
-                        <button className="btn btn-primary" onClick={addAllTasks} disabled={newTasks.length === 0} style={{ fontSize: '12px', padding: '6px 12px', flex: 1 }}>Add Tasks</button>
-                      </div>
-                    </div>
-                  </div>
+                  <button className="btn btn-primary" onClick={addWorkflowStep}>
+                    Add Step
+                  </button>
+                  <button className="btn btn-accent" onClick={handleSaveConfig} style={{ marginTop: '12px' }}>
+                    Save Config & Compile
+                  </button>
                 </div>
               </div>
             </div>
