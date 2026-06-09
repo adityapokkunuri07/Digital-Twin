@@ -1140,13 +1140,31 @@ export default function App() {
     if (!newStep.name) return;
     const inputs = newStep.inputs.split(',').map(x => x.trim()).filter(Boolean);
     const outputs = newStep.outputs.split(',').map(x => x.trim()).filter(Boolean);
-    const deps = newStep.dependencies.split(',').map(x => x.trim()).filter(Boolean);
-    const sid = `step_${uuid4().slice(0, 4)}`;
+    const deps = newStep.dependencies.split(',').map(x => x.trim().replace(/\s+/g, '_')).filter(Boolean);
+    
+    // Generate sequential step ID instead of random UUID so users can easily chain dependencies
+    let maxId = 0;
+    steps.forEach(s => {
+      const parts = s.id.split('_');
+      if (parts.length === 2 && !isNaN(parts[1])) {
+        maxId = Math.max(maxId, parseInt(parts[1], 10));
+      }
+    });
+    const sid = maxId > 0 ? `step_${maxId + 1}` : `step_${steps.length + 1}`;
 
     const updated = [...steps, { id: sid, name: newStep.name, inputs, outputs, dependencies: deps }];
     setSteps(updated);
     setNewStep({ name: '', inputs: '', outputs: '', dependencies: '' });
     handleValidateConfig(updated);
+  };
+
+  const handleNewWorkflow = () => {
+    if (window.confirm("Are you sure you want to clear the current workflow and start a new one?")) {
+      setSteps([]);
+      setConfigId(uuid4());
+      setIsFeasible(true);
+      setValidationErrors([]);
+    }
   };
 
   const deleteStep = (id) => {
@@ -1348,7 +1366,9 @@ ${file.content || ''}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '24px' }}>
               <div className="glass-card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-                  <h3 style={{ fontSize: '18px' }}>Workflow Steps Layout</h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <h3 style={{ fontSize: '18px', margin: 0 }}>Workflow Steps Layout</h3>
+                  </div>
                   <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                     <label style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Auto-pilot</label>
                     <input
@@ -1371,7 +1391,7 @@ ${file.content || ''}
                       borderRadius: '8px'
                     }}>
                       <div>
-                        <h4 style={{ fontWeight: 600 }}>{idx + 1}. {step.name}</h4>
+                        <h4 style={{ fontWeight: 600 }}>{idx + 1}. {step.name} <span style={{fontSize: '13px', fontWeight: 400, color: 'var(--text-muted)'}}>({step.id})</span></h4>
                         <div style={{ display: 'flex', gap: '16px', fontSize: '12px', marginTop: '6px', color: 'var(--text-secondary)' }}>
                           <span><strong>Inputs:</strong> {step.inputs.join(', ') || 'None'}</span>
                           <span><strong>Outputs:</strong> {step.outputs.join(', ') || 'None'}</span>
@@ -1389,9 +1409,37 @@ ${file.content || ''}
                 </div>
               </div>
 
-              {/* Add step Panel */}
-              <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <h3 style={{ fontSize: '18px' }}>Add Step</h3>
+              {/* Right Column: Workflow Settings & Add Step */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                {/* Workflow Settings Panel */}
+                <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <h3 style={{ fontSize: '18px' }}>Workflow Settings</h3>
+                  <div className="input-group" style={{ marginBottom: '8px' }}>
+                    <span className="input-label">Active Version</span>
+                    <input
+                      className="form-input"
+                      placeholder="e.g. 1.0.0"
+                      value={activeVersion}
+                      onChange={e => setActiveVersion(e.target.value)}
+                    />
+                  </div>
+                  <div className="input-group" style={{ marginBottom: '8px' }}>
+                    <span className="input-label">Config ID (Auto-generated)</span>
+                    <input
+                      className="form-input"
+                      value={configId}
+                      readOnly
+                      style={{ color: 'var(--text-muted)', fontSize: '12px', background: 'rgba(0,0,0,0.5)', cursor: 'not-allowed' }}
+                    />
+                  </div>
+                  <button className="btn btn-secondary" onClick={handleNewWorkflow}>
+                    <RefreshCw size={14} style={{ marginRight: '6px' }} /> Initialize New Workflow
+                  </button>
+                </div>
+
+                {/* Add step Panel */}
+                <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <h3 style={{ fontSize: '18px' }}>Add Step</h3>
                 <div className="input-group">
                   <span className="input-label">Step Name</span>
                   <input
@@ -1435,6 +1483,7 @@ ${file.content || ''}
                   Save Config & Compile
                 </button>
               </div>
+            </div>
             </div>
           </div>
         )}
