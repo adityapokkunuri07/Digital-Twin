@@ -115,6 +115,14 @@ class SupabasePreConsultRepository(SupabaseClientMixin, PreConsultRepository):
         res = self.client.table("interaction_logs").insert(record).execute()
         return res.data[0] if res.data else record
 
+    async def get_interaction_logs(self, session_id: UUID) -> List[Dict[str, Any]]:
+        sid_str = str(session_id)
+        if self.use_mock:
+            return sorted([l for l in self._logs if l["session_id"] == sid_str], key=lambda x: x["turn_index"])
+            
+        res = self.client.table("interaction_logs").select("*").eq("session_id", sid_str).order("turn_index", desc=False).execute()
+        return res.data if res.data else []
+
     async def atomic_insert_summary_and_update_state(
         self, 
         session_id: UUID, 
@@ -158,3 +166,43 @@ class SupabasePreConsultRepository(SupabaseClientMixin, PreConsultRepository):
             
         res = self.client.table("appointments").insert(record).execute()
         return res.data[0] if res.data else record
+
+    async def get_patient_appointments(self, patient_id: UUID) -> List[Dict[str, Any]]:
+        """Fetch all appointments for a given patient."""
+        if self.use_mock:
+            return [a for a in self._appointments if str(a.get("patient_id")) == str(patient_id)]
+            
+        try:
+            res = self.client.table("appointments") \
+                .select("*, patients(full_name, email)") \
+                .eq("patient_id", str(patient_id)) \
+                .order("scheduled_time", desc=False) \
+                .execute()
+            return res.data if res.data else []
+        except Exception as e:
+            # Fallback to no foreign key if relationship is ambiguous
+            res = self.client.table("appointments") \
+                .select("*") \
+                .eq("patient_id", str(patient_id)) \
+                .order("scheduled_time", desc=False) \
+                .execute()
+            return res.data if res.data else []
+
+    async def get_all_appointments(self) -> List[Dict[str, Any]]:
+        """Fetch all booked appointments across the system."""
+        if self.use_mock:
+            return sorted(self._appointments, key=lambda x: x.get("scheduled_time", ""))
+            
+        try:
+            res = self.client.table("appointments") \
+                .select("*, patients(full_name, email)") \
+                .order("scheduled_time", desc=False) \
+                .execute()
+            return res.data if res.data else []
+        except Exception as e:
+            # Fallback to no foreign key
+            res = self.client.table("appointments") \
+                .select("*") \
+                .order("scheduled_time", desc=False) \
+                .execute()
+            return res.data if res.data else []

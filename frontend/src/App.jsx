@@ -4,9 +4,12 @@ import {
   ShieldAlert, RefreshCw, CheckCircle2, AlertTriangle,
   Play, RotateCcw, Sparkles, Search, Eye, Trash2,
   ChevronDown, ChevronRight, Folder, File,
-  ZoomIn, ZoomOut, Maximize2
+  ZoomIn, ZoomOut, Maximize2, ShieldCheck,
+  Calendar
 } from 'lucide-react';
 import PreConsultation from './PreConsultation';
+import DoctorEscalationQueue from './DoctorEscalationQueue';
+import DoctorAppointments from './DoctorAppointments';
 
 const API_BASE = "http://localhost:8000/api";
 const DOCTOR_ID = "4a8f39b6-89d1-4db8-bbbe-d9616e00b8e2";
@@ -494,7 +497,7 @@ export default function App() {
       'workflow': 'workflow',
       'rag-ingestion': 'rag',
       'obsidian-mapping': 'obsidian',
-      'pre-consult': 'pre-consult'
+      'escalation': 'escalation'
     };
     if (routeMap[path]) return routeMap[path];
 
@@ -505,31 +508,45 @@ export default function App() {
   // Sync activeTab to URL and localStorage
   useEffect(() => {
     const tabToRoute = {
-      'workflow': 'workflow',
-      'rag': 'rag-ingestion',
-      'obsidian': 'obsidian-mapping',
-      'pre-consult': 'pre-consult'
+      'workflow': 'clinical-control-plane/workflow',
+      'rag': 'clinical-control-plane/rag-ingestion',
+      'obsidian': 'clinical-control-plane/obsidian-mapping',
+      'escalation': 'clinical-control-plane/escalation'
     };
-    const newPath = `/${tabToRoute[activeTab] || 'workflow'}`;
-    if (window.location.pathname !== newPath) {
-      window.history.pushState({ tab: activeTab }, '', newPath);
+    if (window.location.pathname.startsWith('/clinical-control-plane')) {
+      const newPath = `/${tabToRoute[activeTab] || 'clinical-control-plane/workflow'}`;
+      if (window.location.pathname !== newPath) {
+        window.history.pushState({ tab: activeTab }, '', newPath);
+      }
     }
     saveState('activeTab', activeTab);
   }, [activeTab]);
 
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+
   // Handle browser back/forward buttons
   useEffect(() => {
     const handlePopState = (e) => {
+      setCurrentPath(window.location.pathname);
       if (e.state && e.state.tab) {
         setActiveTab(e.state.tab);
       }
     };
     window.addEventListener('popstate', handlePopState);
+    
+    // Check initial path to set activeTab if needed
+    if (window.location.pathname.includes('rag-ingestion')) setActiveTab('rag');
+    else if (window.location.pathname.includes('obsidian-mapping')) setActiveTab('obsidian');
+    else if (window.location.pathname.includes('pre-consult')) setActiveTab('pre-consult');
+    else if (window.location.pathname.includes('workflow')) setActiveTab('workflow');
+    
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // --- Role & Landing State ---
-  const [userRole, setUserRole] = useState(() => loadState('userRole', null));
+  const navigateTo = (path) => {
+    window.history.pushState({}, '', path);
+    setCurrentPath(path);
+  };
 
   // --- Patient Portal State ---
   const [patientChatLog, setPatientChatLog] = useState(() => loadState('patientChatLog', [
@@ -588,7 +605,7 @@ export default function App() {
 
   // --- Persist state to localStorage on change ---
   useEffect(() => {
-    saveState('userRole', userRole);
+    // removed userRole
     saveState('patientChatLog', patientChatLog);
     saveState('patientSessionId', patientSessionId);
     saveState('activeTab', activeTab);
@@ -608,7 +625,7 @@ export default function App() {
     saveState('userQuery', userQuery);
     saveState('sandboxLog', sandboxLog);
     saveState('activeSessionState', activeSessionState);
-  }, [userRole, patientChatLog, patientSessionId, activeTab, configId, activeVersion, isFeasible, validationErrors, steps, autopilot,
+  }, [patientChatLog, patientSessionId, activeTab, configId, activeVersion, isFeasible, validationErrors, steps, autopilot,
     rawText, ingestedChunks, obsidianFiles, selectedObsidianFile, unlearnNodeInput, unlearnRationale,
     sessionId, userQuery, sandboxLog, activeSessionState]);
 
@@ -1158,7 +1175,7 @@ ${file.content || ''}
   // ═══════════════════════════════════════════════
   // 1. Landing / Role Selection Screen
   // ═══════════════════════════════════════════════
-  if (!userRole) {
+  if (currentPath === '/' || currentPath === '') {
     return (
       <div className="landing-container">
         <div className="landing-header">
@@ -1170,7 +1187,7 @@ ${file.content || ''}
 
         <div className="landing-grid">
           {/* Card 1: Doctor */}
-          <div className="landing-card" onClick={() => setUserRole('doctor')}>
+          <div className="landing-card" onClick={() => navigateTo('/clinical-control-plane/workflow')}>
             <div className="landing-card-icon">
               <Activity size={32} />
             </div>
@@ -1181,22 +1198,7 @@ ${file.content || ''}
           </div>
 
           {/* Card 2: Patient */}
-          <div className="landing-card" onClick={() => {
-            setUserRole('patient');
-            if (!patientSessionId && apiStatus === 'online') {
-              const cid = configId || '11111111-1111-1111-1111-111111111111';
-              fetch(`${API_BASE}/session/initiate`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ conversation_id: uuid4(), config_id: cid })
-              })
-                .then(res => res.ok ? res.json() : null)
-                .then(data => {
-                  if (data) setPatientSessionId(data.session_id);
-                })
-                .catch(err => console.error("Auto-init patient session failed:", err));
-            }
-          }}>
+          <div className="landing-card" onClick={() => navigateTo('/patient-dashboard')}>
             <div className="landing-card-icon">
               <Layers size={32} style={{ color: 'var(--success)' }} />
             </div>
@@ -1211,188 +1213,22 @@ ${file.content || ''}
   }
 
   // ═══════════════════════════════════════════════
-  // 2. Patient Telemedicine Chat Portal
+  // 2. Patient Dashboard Portal
   // ═══════════════════════════════════════════════
-  if (userRole === 'patient') {
+  if (currentPath.startsWith('/patient-dashboard')) {
     return (
-      <div className="patient-container">
-        <div className="patient-chat-window">
-          {/* Header */}
-          <div className="patient-chat-header">
-            <div className="patient-doctor-info">
-              <div className="patient-avatar">
-                AS
-                <div className="patient-status-dot"></div>
-              </div>
-              <div>
-                <h3 className="patient-doctor-name">Dr. Avery Sterling</h3>
-                <span className="patient-doctor-status">Online • Primary Care</span>
-              </div>
-            </div>
-            <button
-              className="btn btn-secondary"
-              onClick={() => {
-                setUserRole(null);
-                setPatientChatLog([
-                  { sender: 'doctor', text: "Hello, I am Dr. Avery Sterling. How can I help you today?" }
-                ]);
-                setPatientSessionId(null);
-              }}
-              style={{ fontSize: '12px', padding: '6px 12px' }}
-            >
-              Exit Portal
-            </button>
-          </div>
-
-          {/* Chat Body */}
-          <div className="patient-chat-body">
-            {patientChatLog.map((msg, i) => (
-              <div key={i} className={`patient-message-row ${msg.sender === 'patient' ? 'sent' : 'received'}`}>
-                <div className="patient-bubble">
-                  {msg.text}
-                </div>
-              </div>
-            ))}
-
-            {patientLoading && (
-              <div className="patient-message-row received">
-                <div className="patient-bubble" style={{ background: 'var(--bg-tertiary)' }}>
-                  <div className="typing-indicator">
-                    <span className="typing-dot"></span>
-                    <span className="typing-dot"></span>
-                    <span className="typing-dot"></span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Quick Reply Options */}
-          {!patientLoading && patientChatLog.length > 0 && patientChatLog[patientChatLog.length - 1].sender === 'doctor' && (() => {
-            const lastMsg = patientChatLog[patientChatLog.length - 1].text.toLowerCase();
-            let options = [];
-
-            if (lastMsg.includes('temperature') || lastMsg.includes('body temp')) {
-              options = [
-                { label: '🌡️ 98.6°F (Normal)', value: 'My temperature is 98.6' },
-                { label: '🌡️ 101.2°F (Fever)', value: 'My temperature is 101.2' },
-                { label: '🌡️ 104°F (High Fever)', value: 'My temperature is 104' },
-              ];
-            } else if (lastMsg.includes('blood pressure')) {
-              options = [
-                { label: '💓 120/80 (Normal)', value: 'My bp is 120/80' },
-                { label: '💓 140/90 (High)', value: 'My bp is 140/90' },
-                { label: '💓 160/100 (Very High)', value: 'My bp is 160/100' },
-              ];
-            } else if (lastMsg.includes('chest pain') || lastMsg.includes('shortness of breath') || lastMsg.includes('palpitation') || lastMsg.includes('heart rhythm')) {
-              options = [
-                { label: '✅ No, nothing at all', value: 'No, nothing at all' },
-                { label: '⚠️ Yes, I have chest pain', value: 'Yes, I have chest pain' },
-                { label: '🤔 I\'m not sure', value: "I'm not sure" },
-              ];
-            } else if (lastMsg.includes('smoking') || lastMsg.includes('diabetes') || lastMsg.includes('family') || lastMsg.includes('bmi') || lastMsg.includes('height')) {
-              options = [
-                { label: '✅ No risk factors', value: 'No, nothing at all' },
-                { label: '⚠️ Yes, some risk factors', value: 'Yes, I smoke and have diabetes' },
-                { label: '🤔 I\'m not sure', value: "I'm not sure" },
-              ];
-            } else {
-              options = [
-                { label: '✅ No, nothing at all', value: 'No, nothing at all' },
-                { label: '⚠️ Yes, I have chest pain', value: 'Yes, I have chest pain' },
-                { label: '🤔 I\'m not sure', value: "I'm not sure" },
-              ];
-            }
-
-            // Direct-send function that bypasses stale React state
-            const sendQuickReply = async (replyText) => {
-              if (patientLoading) return;
-              setPatientChatInput('');
-              setPatientChatLog(prev => [...prev, { sender: 'patient', text: replyText }]);
-              setPatientLoading(true);
-
-              let activeId = patientSessionId;
-              if (apiStatus === 'online') {
-                try {
-                  if (!activeId) {
-                    const cid = configId || '11111111-1111-1111-1111-111111111111';
-                    const initRes = await fetch(`${API_BASE}/session/initiate`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ conversation_id: uuid4(), config_id: cid })
-                    });
-                    if (initRes.ok) {
-                      const initData = await initRes.json();
-                      activeId = initData.session_id;
-                      setPatientSessionId(activeId);
-                    }
-                  }
-                  if (activeId) {
-                    const queryRes = await fetch(`${API_BASE}/session/query`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ session_id: activeId, query: replyText })
-                    });
-                    if (queryRes.ok) {
-                      const queryData = await queryRes.json();
-                      setPatientChatLog(prev => [...prev, { sender: 'doctor', text: queryData.output_message }]);
-                      setPatientLoading(false);
-                      return;
-                    }
-                  }
-                } catch (err) {
-                  console.error("Quick reply error:", err);
-                }
-              }
-              // Offline fallback
-              setTimeout(() => {
-                setPatientChatLog(prev => [...prev, { sender: 'doctor', text: '⚠️ [OFFLINE MODE]: Backend server is disconnected.' }]);
-                setPatientLoading(false);
-              }, 500);
-            };
-
-            return (
-              <div style={{ padding: '0 20px 12px 20px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {options.map((opt, i) => (
-                  <button
-                    key={i}
-                    className="btn btn-secondary"
-                    style={{ fontSize: '12px', padding: '6px 12px', borderRadius: '16px', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', transition: 'all 0.2s' }}
-                    onClick={() => sendQuickReply(opt.value)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            );
-          })()}
-
-          {/* Footer Input */}
-          <div className="patient-chat-footer">
-            <input
-              className="patient-input"
-              placeholder="Type your message..."
-              value={patientChatInput}
-              onChange={e => setPatientChatInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handlePatientSendMessage()}
-              disabled={patientLoading}
-            />
-            <button
-              className="patient-send-btn"
-              onClick={handlePatientSendMessage}
-              disabled={patientLoading || !patientChatInput.trim()}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="22" y1="2" x2="11" y2="13"></line>
-                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-              </svg>
-            </button>
-          </div>
-        </div>
+      <div style={{ padding: '20px' }}>
+        <button className="btn btn-secondary" style={{ marginBottom: '20px' }} onClick={() => navigateTo('/')}>
+          ← Back to System Hub
+        </button>
+        <PreConsultation />
       </div>
     );
   }
 
+  // ═══════════════════════════════════════════════
+  // 3. Clinical Control Plane (Doctor App Layout)
+  // ═══════════════════════════════════════════════
   return (
     <div className="app-container">
       {/* LEFT SIDEBAR */}
@@ -1440,20 +1276,29 @@ ${file.content || ''}
           </button>
 
           <button
-            className={`nav-link w-full ${activeTab === 'pre-consult' ? 'active' : ''}`}
-            onClick={() => setActiveTab('pre-consult')}
+            className={`nav-link w-full ${activeTab === 'escalation' ? 'active' : ''}`}
+            onClick={() => setActiveTab('escalation')}
           >
-            <ShieldAlert size={18} />
-            <span>Pre-Consultation</span>
+            <ShieldCheck size={18} style={{ color: activeTab === 'escalation' ? 'inherit' : 'var(--error)' }} />
+            <span>Escalation Queue</span>
           </button>
 
           <button
+            className={`nav-link w-full ${activeTab === 'appointments' ? 'active' : ''}`}
+            onClick={() => setActiveTab('appointments')}
+          >
+            <Calendar size={18} style={{ color: activeTab === 'appointments' ? 'inherit' : 'var(--primary)' }} />
+            <span>Schedule</span>
+          </button>
+
+
+          <button
             className="nav-link w-full"
-            onClick={() => setUserRole(null)}
+            onClick={() => navigateTo('/')}
             style={{ marginTop: '24px', color: 'var(--error)' }}
           >
             <ShieldAlert size={18} style={{ color: 'var(--error)' }} />
-            <span>Switch Role</span>
+            <span>Exit Control Plane</span>
           </button>
         </nav>
 
@@ -1839,109 +1684,117 @@ ${file.content || ''}
         )}
 
         {/* QUERY SANDBOX / TELEMETRY LEDGER */}
-        <section className="glass-card" style={{ marginTop: '40px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h3 style={{ fontSize: '20px', fontFamily: 'var(--font-display)' }}>Runtime Simulation Sandbox</h3>
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button className="btn btn-secondary" onClick={handleInitiateSession}>
-                Initiate Session
-              </button>
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '24px' }}>
-            {/* Input sandbox */}
-            <div>
-              <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
-                <input
-                  className="form-input"
-                  style={{ flex: 1 }}
-                  placeholder="Test a symptom query..."
-                  value={userQuery}
-                  onChange={e => setUserQuery(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleRunQuery()}
-                />
-                <button className="btn btn-primary" onClick={handleRunQuery} disabled={loadingSandbox}>
-                  {loadingSandbox ? (
-                    <RefreshCw size={16} className="animate-spin-fast" />
-                  ) : (
-                    "Run Query"
-                  )}
+        {activeTab === 'workflow' && (
+          <section className="glass-card" style={{ marginTop: '40px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ fontSize: '20px', fontFamily: 'var(--font-display)' }}>Runtime Simulation Sandbox</h3>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button className="btn btn-secondary" onClick={handleInitiateSession}>
+                  Initiate Session
                 </button>
               </div>
-
-              {/* Logs */}
-              <div style={{
-                height: '180px',
-                overflowY: 'auto',
-                border: '1px solid var(--border-light)',
-                borderRadius: '8px',
-                padding: '12px',
-                background: 'rgba(0,0,0,0.3)',
-                fontFamily: 'monospace',
-                fontSize: '12px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px'
-              }}>
-                {sandboxLog.length === 0 ? (
-                  <span style={{ color: 'var(--text-muted)' }}>Console awaiting initialization...</span>
-                ) : (
-                  sandboxLog.map((log, i) => (
-                    <div key={i}>
-                      <span style={{
-                        color: log.node === 'human_intercept' ? 'var(--error)' :
-                          log.node === 'action_dispatch' ? 'var(--success)' : 'var(--secondary)',
-                        fontWeight: 700
-                      }}>[{log.node.toUpperCase()}]</span> {log.msg}
-                    </div>
-                  ))
-                )}
-              </div>
             </div>
 
-            {/* Telemetry info */}
-            <div style={{ display: 'flex', flexDirection: 'column', justifyItems: 'space-between', fontSize: '13px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '24px' }}>
+              {/* Input sandbox */}
               <div>
-                <h4 style={{ fontWeight: 600, marginBottom: '12px' }}>Checkpointer State</h4>
-                {activeSessionState ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div><strong>Session ID:</strong> {activeSessionState.session_id.slice(0, 8)}...</div>
-                    <div><strong>Active Node:</strong> {activeSessionState.current_node}</div>
-                    <div>
-                      <strong>Requires Human:</strong>
-                      <span style={{ marginLeft: '6px', color: activeSessionState.requires_review ? 'var(--error)' : 'var(--success)', fontWeight: 600 }}>
-                        {activeSessionState.requires_review ? 'YES' : 'NO'}
-                      </span>
+                <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+                  <input
+                    className="form-input"
+                    style={{ flex: 1 }}
+                    placeholder="Test a symptom query..."
+                    value={userQuery}
+                    onChange={e => setUserQuery(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleRunQuery()}
+                  />
+                  <button className="btn btn-primary" onClick={handleRunQuery} disabled={loadingSandbox}>
+                    {loadingSandbox ? (
+                      <RefreshCw size={16} className="animate-spin-fast" />
+                    ) : (
+                      "Run Query"
+                    )}
+                  </button>
+                </div>
+
+                {/* Logs */}
+                <div style={{
+                  height: '180px',
+                  overflowY: 'auto',
+                  border: '1px solid var(--border-light)',
+                  borderRadius: '8px',
+                  padding: '12px',
+                  background: 'rgba(0,0,0,0.3)',
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px'
+                }}>
+                  {sandboxLog.length === 0 ? (
+                    <span style={{ color: 'var(--text-muted)' }}>Console awaiting initialization...</span>
+                  ) : (
+                    sandboxLog.map((log, i) => (
+                      <div key={i}>
+                        <span style={{
+                          color: log.node === 'human_intercept' ? 'var(--error)' :
+                            log.node === 'action_dispatch' ? 'var(--success)' : 'var(--secondary)',
+                          fontWeight: 700
+                        }}>[{log.node.toUpperCase()}]</span> {log.msg}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Telemetry info */}
+              <div style={{ display: 'flex', flexDirection: 'column', justifyItems: 'space-between', fontSize: '13px' }}>
+                <div>
+                  <h4 style={{ fontWeight: 600, marginBottom: '12px' }}>Checkpointer State</h4>
+                  {activeSessionState ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <div><strong>Session ID:</strong> {activeSessionState.session_id.slice(0, 8)}...</div>
+                      <div><strong>Active Node:</strong> {activeSessionState.current_node}</div>
+                      <div>
+                        <strong>Requires Human:</strong>
+                        <span style={{ marginLeft: '6px', color: activeSessionState.requires_review ? 'var(--error)' : 'var(--success)', fontWeight: 600 }}>
+                          {activeSessionState.requires_review ? 'YES' : 'NO'}
+                        </span>
+                      </div>
+                      <div>
+                        <strong>State Paused:</strong>
+                        <span style={{ marginLeft: '6px', color: activeSessionState.is_paused ? 'var(--error)' : 'var(--success)', fontWeight: 600 }}>
+                          {activeSessionState.is_paused ? 'YES' : 'NO'}
+                        </span>
+                      </div>
+                      <div>
+                        <strong>Variables Gathered:</strong>
+                        <pre style={{ fontSize: '11px', background: 'rgba(0,0,0,0.1)', padding: '6px', borderRadius: '4px', marginTop: '4px' }}>
+                          {JSON.stringify(activeSessionState.gathered_data, null, 2)}
+                        </pre>
+                      </div>
                     </div>
-                    <div>
-                      <strong>State Paused:</strong>
-                      <span style={{ marginLeft: '6px', color: activeSessionState.is_paused ? 'var(--error)' : 'var(--success)', fontWeight: 600 }}>
-                        {activeSessionState.is_paused ? 'YES' : 'NO'}
-                      </span>
-                    </div>
-                    <div>
-                      <strong>Variables Gathered:</strong>
-                      <pre style={{ fontSize: '11px', background: 'rgba(0,0,0,0.1)', padding: '6px', borderRadius: '4px', marginTop: '4px' }}>
-                        {JSON.stringify(activeSessionState.gathered_data, null, 2)}
-                      </pre>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ color: 'var(--text-muted)' }}>No active session.</div>
-                )}
+                  ) : (
+                    <div style={{ color: 'var(--text-muted)' }}>No active session.</div>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
+        )}
 
-        {/* PRE-CONSULTATION TAB */}
-        {activeTab === 'pre-consult' && (
-          <div style={{ marginTop: '20px' }}>
-            <PreConsultation />
+        {/* ESCALATION QUEUE TAB */}
+        {activeTab === 'escalation' && (
+          <div style={{ marginTop: '10px' }}>
+            <DoctorEscalationQueue />
           </div>
         )}
 
+        {/* APPOINTMENTS TAB */}
+        {activeTab === 'appointments' && (
+          <div style={{ marginTop: '10px' }}>
+            <DoctorAppointments />
+          </div>
+        )}
       </main>
     </div>
   );

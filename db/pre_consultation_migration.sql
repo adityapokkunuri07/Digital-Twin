@@ -27,7 +27,7 @@ CREATE TYPE appointment_status AS ENUM (
 -- 2. Tables
 CREATE TABLE IF NOT EXISTS pre_consultation_sessions (
     session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    patient_id UUID NOT NULL,
+    patient_id UUID REFERENCES patients(patient_id) ON DELETE CASCADE,
     config_id UUID REFERENCES expert_twin_configs(config_id) ON DELETE CASCADE,
     status pre_consultation_status NOT NULL DEFAULT 'GATHERING',
     current_confidence_score NUMERIC(5,4) NOT NULL DEFAULT 0.0000,
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS pre_consult_summaries (
 
 CREATE TABLE IF NOT EXISTS appointments (
     appointment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    patient_id UUID NOT NULL,
+    patient_id UUID REFERENCES patients(patient_id) ON DELETE CASCADE,
     session_id UUID REFERENCES pre_consultation_sessions(session_id) ON DELETE CASCADE,
     doctor_id UUID NOT NULL,
     scheduled_time TIMESTAMP WITH TIME ZONE NOT NULL,

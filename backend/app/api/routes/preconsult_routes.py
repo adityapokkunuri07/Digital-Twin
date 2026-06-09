@@ -34,6 +34,13 @@ async def get_session(
     """Polling route for frontend to get session and summary state."""
     return await service.get_session_details(session_id)
 
+@router.get("/queue")
+async def get_pending_queue(
+    service: PreConsultationService = Depends(get_preconsult_service),
+):
+    """Fetch all sessions that are waiting for doctor review."""
+    return await service.get_pending_queue()
+
 
 @router.post("/chat")
 async def process_chat_turn(
@@ -63,11 +70,25 @@ async def submit_doctor_review(
 @router.post("/book")
 async def book_appointment(
     payload: BookAppointmentRequest,
-    patient_id: UUID, # Assume extracted from auth token in a real app
     service: PreConsultationService = Depends(get_preconsult_service),
 ):
     """Task 4: AI Coordinator completes the booking."""
     response = await service.book_appointment(
-        payload.session_id, patient_id, payload.doctor_id, payload.scheduled_time
+        payload.session_id, payload.patient_id, payload.doctor_id, payload.scheduled_time
     )
     return response
+
+@router.get("/appointments/patient/{patient_id}")
+async def get_patient_appointments(
+    patient_id: UUID,
+    service: PreConsultationService = Depends(get_preconsult_service),
+):
+    """Fetch all appointments for a given patient."""
+    return await service.get_patient_appointments(patient_id)
+
+@router.get("/appointments/all")
+async def get_all_appointments(
+    service: PreConsultationService = Depends(get_preconsult_service),
+):
+    """Fetch all appointments across the system for the Doctor Control Plane."""
+    return await service.get_all_appointments()

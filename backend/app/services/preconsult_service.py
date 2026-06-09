@@ -2,11 +2,14 @@
 Pre-Consultation Workflow Service — State Controller
 """
 import logging
+import json
 from typing import Dict, Any, List
 from uuid import UUID
 from fastapi import BackgroundTasks
 from datetime import datetime
+from google import genai
 
+from backend.app.core.config import settings
 from backend.app.core.interfaces.repositories import PreConsultRepository
 from backend.app.orchestrator.safety_rules.base import SafetyRule
 
@@ -32,10 +35,27 @@ class PreConsultationService:
         self._repo = preconsult_repo
         self._safety_rules = safety_rules or []
         self._orchestrator = langgraph_orchestrator
+        
+        # Initialize Gemini Client
+        if settings.GEMINI_API_KEY:
+            self.llm_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        else:
+            self.llm_client = None
+            logger.warning("GEMINI_API_KEY is not set. PreConsultationService LLM integration will fail.")
 
     async def start_session(self, patient_id: UUID, config_id: UUID) -> Dict[str, Any]:
         """Task 1 Init: Create a new session."""
         session = await self._repo.create_session(patient_id, config_id)
+        
+        # Save the initial greeting
+        await self._repo.append_interaction_log(
+            session_id=UUID(session["session_id"]),
+            sender_type="AI_DOCTOR",
+            message_text="Hello! I am Dr. Sterling's AI assistant. To help the doctor prepare, could you briefly describe your symptoms today?",
+            extracted_entities={},
+            turn_index=0
+        )
+        
         return session
 
     async def get_session_details(self, session_id: UUID) -> Dict[str, Any]:
@@ -53,10 +73,27 @@ class PreConsultationService:
                 "doctor_review_notes": session.get("doctor_review_notes", None)
             }
             
+        logs = await self._repo.get_interaction_logs(session_id)
+        
         return {
             "session": session,
-            "summary": summary
+            "summary": summary,
+            "logs": logs
         }
+
+    async def get_pending_queue(self) -> List[Dict[str, Any]]:
+        """Fetch all sessions that are waiting for doctor review."""
+        try:
+            response = self._repo.client.table('pre_consultation_sessions') \
+                .select('session_id, status, current_confidence_score, updated_at, patients!fk_patient(full_name, email)') \
+                .eq('status', 'PENDING_REVIEW') \
+                .order('updated_at', desc=True) \
+                .execute()
+            
+            return response.data if response.data else []
+        except Exception as e:
+            logger.error(f"Error fetching pending queue: {e}")
+            return []
 
     async def _async_trigger_synthesis_graph(self, session_id: UUID, is_partial: bool, reason: str):
         """
@@ -80,10 +117,28 @@ class PreConsultationService:
         current_state_json = session.get("current_extracted_entities", {})
         turn_count = session.get("turn_count", 0)
 
+        # 0. Save the patient's raw message immediately
+        await self._repo.append_interaction_log(
+            session_id=session_id,
+            sender_type="PATIENT",
+            message_text=message,
+            extracted_entities={},
+            turn_index=turn_count + 1
+        )
+
         # 1. Zero-Trust Emergency Triage Gate BEFORE processing
         for rule in self._safety_rules:
             is_anomaly, reason = rule.evaluate({"message": message}, classification_score=1.0)
             if is_anomaly:
+                # Also log the system's triage alert
+                await self._repo.append_interaction_log(
+                    session_id=session_id,
+                    sender_type="AI_DOCTOR",
+                    message_text=f"Emergency Triage Triggered: {reason}. Compiling file for immediate human review.",
+                    extracted_entities={},
+                    turn_index=turn_count + 2
+                )
+                
                 # Force partial synthesis trap and delegate to LangGraph background task
                 await self._repo.update_session_state(session_id, "SYNTHESIZING_PARTIAL", 1.0)
                 background_tasks.add_task(self._async_trigger_synthesis_graph, session_id, True, f"Emergency Triage: {reason}")
@@ -97,23 +152,52 @@ class PreConsultationService:
             return {"alert": "Maximum turns reached. Compiling file for human review."}
 
         # 3. LLM-Driven Extraction and Confidence Scoring
-        # Here we would normally call the LLM, passing ONLY `current_state_json` and `message`
-        # For implementation purposes, we mock the LLM response.
-        # In reality, this delegates to your Gemini pipeline.
-        confidence = session.get("current_confidence_score", 0.0) + 0.3 # Mock increment
-        updated_state_json = current_state_json
-        updated_state_json[f"turn_{turn_count}"] = message # Mock extraction
-        next_question = "Can you tell me more?" # Mock LLM response
+        if self.llm_client:
+            try:
+                logs = await self._repo.get_interaction_logs(session_id)
+                chat_history = "\n".join([f"{log['sender']}: {log['message_text']}" for log in logs])
+                
+                system_prompt = (
+                    "You are the digital twin of Dr. Sterling, a highly cautious and overly-concerned medical professional. "
+                    "You are conducting an intake pre-consultation. You must adopt a strict, concerned persona. "
+                    "Regardless of how minor the patient's symptoms seem, you must strongly insist that they go to the hospital or emergency room immediately for a physical evaluation. "
+                    "Ask brief follow-up questions to gather more data, but always frame it around the urgency of them seeking in-person hospital care.\n\n"
+                    "Current extracted entities:\n"
+                    f"{json.dumps(current_state_json)}\n\n"
+                    "Chat history:\n"
+                    f"{chat_history}\n\n"
+                    "Respond with ONLY a JSON object containing the following keys:\n"
+                    "- 'extracted_entities': An updated dictionary of the patient's clinical entities (e.g. Symptom, Duration, Severity).\n"
+                    "- 'confidence_score_increment': A float between 0.0 and 0.4 representing how much clarity was gained from the latest message.\n"
+                    "- 'next_question': Your next question or statement to the patient, strictly adhering to the persona described above."
+                )
+                
+                response = self.llm_client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=[system_prompt],
+                    config={"response_mime_type": "application/json"}
+                )
+                
+                response_data = json.loads(response.text)
+                confidence_increment = float(response_data.get("confidence_score_increment", 0.1))
+                confidence = session.get("current_confidence_score", 0.0) + confidence_increment
+                updated_state_json = response_data.get("extracted_entities", current_state_json)
+                next_question = response_data.get("next_question", "Please go to the hospital immediately. Can you tell me more about what you are feeling?")
+            except Exception as e:
+                logger.error(f"LLM integration failed: {e}")
+                confidence = session.get("current_confidence_score", 0.0) + 0.3
+                updated_state_json = current_state_json
+                updated_state_json[f"turn_{turn_count}"] = message
+                next_question = "I strongly advise you to go to the hospital immediately. Can you provide more details about your symptoms?"
+        else:
+            confidence = session.get("current_confidence_score", 0.0) + 0.3
+            updated_state_json = current_state_json
+            updated_state_json[f"turn_{turn_count}"] = message
+            next_question = "I strongly advise you to go to the hospital immediately. Can you provide more details about your symptoms?"
 
-        # 4. Increment turn count and update logs + running state
-        await self._repo.append_interaction_log(
-            session_id=session_id,
-            sender_type="PATIENT",
-            message_text=message,
-            extracted_entities=updated_state_json,
-            turn_index=turn_count + 1
-        )
-        
+        # The patient's message was already appended at step 0.
+        # But we need to update the extracted entities for that turn in a real implementation.
+        # For now, we just log the AI's response.
         await self._repo.append_interaction_log(
             session_id=session_id,
             sender_type="AI_DOCTOR",
@@ -156,3 +240,11 @@ class PreConsultationService:
         await self._repo.update_session_state(session_id, "BOOKED", session.get("current_confidence_score", 1.0))
         
         return appointment
+
+    async def get_patient_appointments(self, patient_id: UUID) -> List[Dict[str, Any]]:
+        """Fetch all appointments for a patient."""
+        return await self._repo.get_patient_appointments(patient_id)
+
+    async def get_all_appointments(self) -> List[Dict[str, Any]]:
+        """Fetch all appointments across the system."""
+        return await self._repo.get_all_appointments()

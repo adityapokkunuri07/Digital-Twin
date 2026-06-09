@@ -184,6 +184,10 @@ class PreConsultRepository(ABC):
         ...
 
     @abstractmethod
+    async def get_interaction_logs(self, session_id: UUID) -> List[Dict[str, Any]]:
+        ...
+
+    @abstractmethod
     async def atomic_insert_summary_and_update_state(
         self, 
         session_id: UUID, 
@@ -197,4 +201,12 @@ class PreConsultRepository(ABC):
     async def create_appointment(
         self, patient_id: UUID, session_id: UUID, doctor_id: UUID, scheduled_time: datetime
     ) -> Dict[str, Any]:
+        ...
+
+    @abstractmethod
+    async def get_patient_appointments(self, patient_id: UUID) -> List[Dict[str, Any]]:
+        ...
+
+    @abstractmethod
+    async def get_all_appointments(self) -> List[Dict[str, Any]]:
         ...
