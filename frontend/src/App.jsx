@@ -571,6 +571,7 @@ export default function App() {
   ]));
   const [autopilot, setAutopilot] = useState(() => loadState('autopilot', true));
   const [newStep, setNewStep] = useState({ name: '', inputs: '', outputs: '', dependencies: '' });
+  const [newTasks, setNewTasks] = useState([]); // batch task inputs for workflow
 
   const [chatInput, setChatInput] = useState('');
 
@@ -1149,6 +1150,34 @@ export default function App() {
     handleValidateConfig(updated);
   };
 
+  const addTaskField = () => {
+    setNewTasks(prev => [...prev, { name: '', inputs: '', outputs: '', dependencies: '' }]);
+  };
+
+  const updateNewTask = (idx, field, value) => {
+    setNewTasks(prev => prev.map((t, i) => i === idx ? { ...t, [field]: value } : t));
+  };
+
+  const removeNewTask = (idx) => {
+    setNewTasks(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const addAllTasks = () => {
+    if (!newTasks || newTasks.length === 0) return;
+    const created = newTasks.map(t => {
+      const inputs = (t.inputs || '').split(',').map(x => x.trim()).filter(Boolean);
+      const outputs = (t.outputs || '').split(',').map(x => x.trim()).filter(Boolean);
+      const deps = (t.dependencies || '').split(',').map(x => x.trim()).filter(Boolean);
+      return { id: `step_${uuid4().slice(0,4)}`, name: t.name || 'Untitled', inputs, outputs, dependencies: deps };
+    }).filter(t => t.name);
+
+    if (created.length === 0) return;
+    const updated = [...steps, ...created];
+    setSteps(updated);
+    setNewTasks([]);
+    handleValidateConfig(updated);
+  };
+
   const deleteStep = (id) => {
     const updated = steps.filter(s => s.id !== id);
     setSteps(updated);
@@ -1431,9 +1460,38 @@ ${file.content || ''}
                 <button className="btn btn-primary" onClick={addWorkflowStep}>
                   Add Step
                 </button>
-                <button className="btn btn-accent" onClick={handleSaveConfig} style={{ marginTop: '12px' }}>
-                  Save Config & Compile
-                </button>
+                <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="btn btn-primary" onClick={addWorkflowStep}>
+                      Add Step
+                    </button>
+                    <button className="btn btn-accent" onClick={handleSaveConfig}>
+                      Save Config & Compile
+                    </button>
+                  </div>
+
+                  <div style={{ borderTop: '1px dashed var(--border-light)', paddingTop: '10px' }}>
+                    <h4 style={{ margin: '6px 0' }}>Batch Add Tasks</h4>
+                    {newTasks.map((t, i) => (
+                      <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                        <input className="form-input" placeholder="Task name" value={t.name} onChange={e => updateNewTask(i, 'name', e.target.value)} />
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <input className="form-input" placeholder="Inputs (comma)" value={t.inputs} onChange={e => updateNewTask(i, 'inputs', e.target.value)} />
+                          <input className="form-input" placeholder="Outputs (comma)" value={t.outputs} onChange={e => updateNewTask(i, 'outputs', e.target.value)} />
+                        </div>
+                        <input className="form-input" placeholder="Dependencies (step IDs)" value={t.dependencies} onChange={e => updateNewTask(i, 'dependencies', e.target.value)} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <button className="btn" onClick={() => removeNewTask(i)} style={{ background: 'transparent', color: 'var(--error)' }}>Remove</button>
+                        </div>
+                      </div>
+                    ))}
+
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                      <button className="btn" onClick={addTaskField}>Add another task</button>
+                      <button className="btn btn-primary" onClick={addAllTasks} disabled={newTasks.length === 0}>Add Tasks</button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
