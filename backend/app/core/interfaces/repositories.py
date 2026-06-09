@@ -34,6 +34,11 @@ class ConfigRepository(ABC):
         """Retrieve a configuration by its ID. Returns None if not found."""
         ...
 
+    @abstractmethod
+    async def list_configs(self, doctor_id: UUID) -> List[Dict[str, Any]]:
+        """List all configurations for a given doctor."""
+        ...
+
 
 class KnowledgeRepository(ABC):
     """

@@ -7,7 +7,7 @@ for expert twin configurations. Route handlers delegate to this service.
 Depends on abstractions (ConfigRepository, CotRepository, ExportService)
 rather than concrete implementations (Dependency Inversion).
 """
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from uuid import UUID, uuid4
 import logging
 
@@ -35,6 +35,14 @@ class ConfigService:
         self._config_repo = config_repo
         self._cot_repo = cot_repo
         self._export_service = export_service
+
+    async def get_config(self, config_id: UUID) -> Optional[Dict[str, Any]]:
+        """Retrieve an expert twin configuration by its ID."""
+        return await self._config_repo.get_expert_config(config_id)
+
+    async def list_configs(self, doctor_id: UUID) -> List[Dict[str, Any]]:
+        """List all expert twin configurations for a doctor."""
+        return await self._config_repo.list_configs(doctor_id)
 
     def validate_config(
         self, workflow_config: Dict[str, Any]

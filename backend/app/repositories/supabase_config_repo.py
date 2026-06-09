@@ -65,3 +65,17 @@ class SupabaseConfigRepository(SupabaseClientMixin, ConfigRepository):
             .execute()
         )
         return res.data[0] if res.data else None
+
+    async def list_configs(self, doctor_id: UUID) -> List[Dict[str, Any]]:
+        did_str = str(doctor_id)
+        
+        if self.use_mock:
+            return [c for c in self._configs.values() if c.get("doctor_id") == did_str]
+            
+        res = (
+            self.client.table("expert_twin_configs")
+            .select("config_id, active_version, updated_at")
+            .eq("doctor_id", did_str)
+            .execute()
+        )
+        return res.data if res.data else []

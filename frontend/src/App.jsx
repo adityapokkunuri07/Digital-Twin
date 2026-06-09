@@ -564,11 +564,8 @@ export default function App() {
   const [apiStatus, setApiStatus] = useState('offline'); // always re-probe on load
 
   // --- Workflow Configurator State ---
-  const [steps, setSteps] = useState(() => loadState('steps', [
-    { id: "step_1", name: "Intake", inputs: [], outputs: ["symptoms", "temperature"], dependencies: [] },
-    { id: "step_2", name: "Diagnosis Gate", inputs: ["symptoms", "temperature"], outputs: ["is_severe", "diagnosis_summary"], dependencies: ["step_1"] },
-    { id: "step_3", name: "Action Escalator", inputs: ["is_severe", "diagnosis_summary"], outputs: ["escalation_done"], dependencies: ["step_2"] }
-  ]));
+  const [steps, setSteps] = useState(() => loadState('steps', []));
+  const [configLoading, setConfigLoading] = useState(false);
   const [autopilot, setAutopilot] = useState(() => loadState('autopilot', true));
   const [newStep, setNewStep] = useState({ name: '', inputs: '', outputs: '', dependencies: '' });
   const [newTasks, setNewTasks] = useState([]); // batch task inputs for workflow
@@ -649,6 +646,39 @@ export default function App() {
   };
 
   // --- API Handlers ---
+  const loadConfigFromDB = async (cid) => {
+    if (apiStatus !== 'online') return;
+    setConfigLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/config/${cid}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.workflow_config && data.workflow_config.steps) {
+          setSteps(data.workflow_config.steps);
+          if (data.workflow_config.autopilot !== undefined) {
+            setAutopilot(data.workflow_config.autopilot);
+          }
+          if (data.active_version) {
+            setActiveVersion(data.active_version);
+          }
+          setIsFeasible(data.is_feasible);
+          setValidationErrors(data.validation_errors || []);
+        } else {
+          // Config exists but has no steps — start empty
+          setSteps([]);
+        }
+      } else if (res.status === 404) {
+        // No config saved yet for this ID — start with empty workflow
+        setSteps([]);
+        saveState('steps', []);
+      }
+    } catch (err) {
+      console.error("Failed to load config dynamically", err);
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
   const handleValidateConfig = async (currentSteps = steps) => {
     const payload = {
       workflow_config: { steps: currentSteps }
@@ -783,8 +813,9 @@ export default function App() {
   useEffect(() => {
     if (apiStatus === 'online') {
       handleSyncObsidian(true);
+      loadConfigFromDB(configId);
     }
-  }, [apiStatus]);
+  }, [apiStatus, configId]);
 
 
 
@@ -1426,32 +1457,55 @@ ${file.content || ''}
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {steps.map((step, idx) => (
-                    <div key={step.id} style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      padding: '16px',
-                      background: 'rgba(255,255,255,0.02)',
-                      border: '1px solid var(--border-light)',
-                      borderRadius: '8px'
+                  {configLoading ? (
+                    <div style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                      padding: '48px 20px', color: 'var(--text-muted)', gap: '12px'
                     }}>
-                      <div>
-                        <h4 style={{ fontWeight: 600 }}>{idx + 1}. {step.name} <span style={{ fontSize: '13px', fontWeight: 400, color: 'var(--text-muted)' }}>({step.id})</span></h4>
-                        <div style={{ display: 'flex', gap: '16px', fontSize: '12px', marginTop: '6px', color: 'var(--text-secondary)' }}>
-                          <span><strong>Inputs:</strong> {step.inputs.join(', ') || 'None'}</span>
-                          <span><strong>Outputs:</strong> {step.outputs.join(', ') || 'None'}</span>
-                          <span><strong>Depends:</strong> {step.dependencies.join(', ') || 'None'}</span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => deleteStep(step.id)}
-                        style={{ background: 'transparent', border: 'none', color: 'var(--error)', cursor: 'pointer' }}
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      <RefreshCw size={28} className="animate-pulse-slow" style={{ color: 'var(--primary)' }} />
+                      <span style={{ fontSize: '14px' }}>Loading workflow from database…</span>
                     </div>
-                  ))}
+                  ) : steps.length === 0 ? (
+                    <div style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                      padding: '48px 20px', color: 'var(--text-muted)', gap: '12px',
+                      border: '1px dashed var(--border-light)', borderRadius: '12px',
+                      background: 'rgba(255,255,255,0.01)'
+                    }}>
+                      <Layers size={32} style={{ opacity: 0.3 }} />
+                      <span style={{ fontSize: '14px', textAlign: 'center' }}>No workflow steps configured yet.</span>
+                      <span style={{ fontSize: '12px', textAlign: 'center', maxWidth: '300px' }}>
+                        Use the <strong>Add Step</strong> panel on the right to build your workflow, or <strong>Save Config</strong> after adding steps.
+                      </span>
+                    </div>
+                  ) : (
+                    steps.map((step, idx) => (
+                      <div key={step.id} style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '16px',
+                        background: 'rgba(255,255,255,0.02)',
+                        border: '1px solid var(--border-light)',
+                        borderRadius: '8px'
+                      }}>
+                        <div>
+                          <h4 style={{ fontWeight: 600 }}>{idx + 1}. {step.name} <span style={{ fontSize: '13px', fontWeight: 400, color: 'var(--text-muted)' }}>({step.id})</span></h4>
+                          <div style={{ display: 'flex', gap: '16px', fontSize: '12px', marginTop: '6px', color: 'var(--text-secondary)' }}>
+                            <span><strong>Inputs:</strong> {step.inputs.join(', ') || 'None'}</span>
+                            <span><strong>Outputs:</strong> {step.outputs.join(', ') || 'None'}</span>
+                            <span><strong>Depends:</strong> {step.dependencies.join(', ') || 'None'}</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => deleteStep(step.id)}
+                          style={{ background: 'transparent', border: 'none', color: 'var(--error)', cursor: 'pointer' }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
 
