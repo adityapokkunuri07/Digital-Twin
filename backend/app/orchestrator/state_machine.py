@@ -20,6 +20,7 @@ from backend.app.services.llm.gemini_llm import GeminiLLMService
 from backend.app.orchestrator.extractors.base import DataExtractor
 from backend.app.orchestrator.safety_rules.base import SafetyRule
 from backend.app.core.interfaces.embedding import EmbeddingService
+from backend.app.services.context_synthesizer import ContextSynthesizer
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,9 @@ class AgentState(TypedDict):
     is_paused: bool
     classification_score: float
     history: List[Dict[str, Any]]
+    doctor_override_message: str
+    patient_consent_granted: bool
+    pending_action: str
 
 
 class ZeroTrustOrchestrator:
@@ -202,6 +206,9 @@ class ZeroTrustOrchestrator:
             "is_paused": False,
             "classification_score": 1.0,
             "history": [],
+            "doctor_override_message": "",
+            "patient_consent_granted": False,
+            "pending_action": "",
         }
 
         await self._session_repo.save_active_session(
@@ -243,6 +250,60 @@ class ZeroTrustOrchestrator:
                 "Operations are frozen."
             )
             return state
+
+        # 2b. Patient Confirmation Gate — evaluate consent after doctor injection
+        _CONSENT_KEYWORDS = {"yes", "book", "confirm", "agree", "schedule", "ok", "sure", "proceed", "okay", "fine", "absolutely"}
+        if state.get("current_node") == "awaiting_confirmation":
+            user_words = set(user_query.lower().split())
+            if user_words & _CONSENT_KEYWORDS:
+                # Patient consented — route to action dispatch
+                state["patient_consent_granted"] = True
+                state["current_node"] = "action_dispatch"
+                state["output_message"] = (
+                    "Thank you for confirming. I'll proceed with scheduling and next steps. "
+                    "The doctor's office will follow up with you shortly."
+                )
+                state["history"].append({"role": "user", "content": user_query})
+                state["history"].append({"role": "assistant", "content": state["output_message"]})
+
+                await self._session_repo.save_active_session(
+                    session_id, UUID(state["conversation_id"]), UUID(state["config_id"]),
+                    state["current_node"], state,
+                    state["is_paused"], state["requires_review"],
+                )
+                return state
+            else:
+                # Patient declined or asked a question — clarify and stay in confirmation
+                clarification = (
+                    f"I understand you may have questions. The doctor's recommendation was: "
+                    f"\"{state.get('doctor_override_message', '')}\". "
+                    f"Would you like to proceed, or is there anything else you'd like to discuss first?"
+                )
+                state["output_message"] = clarification
+                state["history"].append({"role": "user", "content": user_query})
+                state["history"].append({"role": "assistant", "content": clarification})
+
+                await self._session_repo.save_active_session(
+                    session_id, UUID(state["conversation_id"]), UUID(state["config_id"]),
+                    state["current_node"], state,
+                    state["is_paused"], state["requires_review"],
+                )
+                return state
+
+        # Context Synthesis (Rolling Memory)
+        llm_client = self._llm_service.client if self._llm_service and not self._llm_service.use_fallback else None
+        synthesizer = ContextSynthesizer(llm_client)
+        if synthesizer.should_synthesize(state["history"]):
+            # Prevent re-synthesizing if we haven't added new turns since last synthesis
+            last_synth_len = state["gathered_data"].get("_last_synth_history_len", 0)
+            if len(state["history"]) > last_synth_len:
+                profile = synthesizer.synthesize(state["history"], state["gathered_data"])
+                if profile:
+                    state["gathered_data"]["_synthesized_profile"] = profile
+                    state["gathered_data"]["_last_synth_history_len"] = len(state["history"])
+        
+        profile = state["gathered_data"].get("_synthesized_profile", {})
+        optimized_context = synthesizer.build_optimized_context(profile, state["history"], n_recent=3)
 
         config_id = UUID(state["config_id"])
         config_record = await self._config_repo.get_expert_config(config_id)
@@ -332,7 +393,7 @@ class ZeroTrustOrchestrator:
                             step.get("name", "Unknown Step"), 
                             step_inputs_data, 
                             missing_outputs, 
-                            context=eval_context
+                            context_window=eval_context
                         )
                         if result:
                             state["gathered_data"].update(result)
@@ -341,7 +402,7 @@ class ZeroTrustOrchestrator:
             return evaluated_any_in_phase
 
         # PHASE 1: DATA GATHERING NODE
-        evaluate_phase_steps("data_gathering")
+        evaluate_phase_steps("data_gathering", eval_context=optimized_context)
 
         # Check if we're still missing root variables
         missing_root_inputs = [
@@ -358,22 +419,33 @@ class ZeroTrustOrchestrator:
             # Dynamic Question Generation
             if self._llm_service and not self._llm_service.use_fallback:
                 state["output_message"] = self._llm_service.generate_followup(
-                    missing_root_inputs, state["gathered_data"]
+                    missing_root_inputs, state["gathered_data"], context_window=optimized_context
                 )
             else:
                 state["output_message"] = _build_doctor_followup(
                     missing_root_inputs, state["gathered_data"]
                 )
         else:
+            # Map current execution phase to RAG operational_mode
+            mode_map = {
+                "data_gathering": "LEARN",
+                "processing": "EXECUTION",
+                "human_intercept": "TROUBLESHOOTING",
+                "action_dispatch": "EXECUTION",
+            }
+            current_mode = mode_map.get(state["current_node"], None)
+
             # Context Retrieval via Hybrid RAG
             context, selected_chunks, rejected = await self._rag_engine.retrieve_context(
-                config_id, user_query,
+                config_id, user_query, operational_mode=current_mode,
             )
             state["retrieved_context"] = context
             
+            combined_context = f"{optimized_context}\n\n--- CLINICAL GUIDELINES ---\n{context}" if context else optimized_context
+            
             # PHASE 2: PROCESSING NODE
             state["current_node"] = "processing"
-            evaluate_phase_steps("processing", eval_context=context)
+            evaluate_phase_steps("processing", eval_context=combined_context)
 
             # Get classification score from top chunk
             top_score = (
@@ -382,7 +454,7 @@ class ZeroTrustOrchestrator:
             state["classification_score"] = top_score
 
             # PHASE 3: HUMAN INTERCEPT NODE
-            evaluate_phase_steps("human_intercept", eval_context=context)
+            evaluate_phase_steps("human_intercept", eval_context=combined_context)
 
             # Check Hardcoded Safety Rules
             anomaly_reasons = []
@@ -410,17 +482,15 @@ class ZeroTrustOrchestrator:
                 # Build an urgent but reassuring message
                 concern_details = "; ".join(anomaly_reasons)
                 state["output_message"] = (
-                    f"I want to be transparent with you — based on what you've shared, "
-                    f"I've identified some findings that need immediate attention: "
-                    f"{concern_details}. "
-                    f"\n\nFor your safety, I'm connecting you directly with the doctor "
-                    f"for an urgent review. Please stay where you are — if you're "
-                    f"experiencing severe symptoms, please call emergency services (112) immediately."
+                    f"Based on the information you've provided, I've identified findings that "
+                    f"require the doctor's direct review: {concern_details}. "
+                    f"\n\nI'm connecting you with the doctor now. They will review your case "
+                    f"and follow up with next steps shortly."
                 )
             else:
                 # PHASE 4: ACTION DISPATCH NODE
                 state["current_node"] = "action_dispatch"
-                evaluate_phase_steps("action_dispatch", eval_context=context)
+                evaluate_phase_steps("action_dispatch", eval_context=combined_context)
 
                 # Build a doctor-like assessment summary
                 gathered = state["gathered_data"]
@@ -460,7 +530,44 @@ class ZeroTrustOrchestrator:
             state["output_message"], chunk_ids, state["classification_score"],
         )
 
+        # Append turn to history
+        state["history"].append({"role": "user", "content": user_query})
+        state["history"].append({"role": "assistant", "content": state["output_message"]})
+
         # 8. Save updated session checkpoint
+        await self._session_repo.save_active_session(
+            session_id, UUID(state["conversation_id"]), config_id,
+            state["current_node"], state,
+            state["is_paused"], state["requires_review"],
+        )
+
+        return state
+
+    async def inject_doctor_message(
+        self, session_id: UUID, doctor_message: str
+    ) -> Dict[str, Any]:
+        """
+        Inject the doctor's exact message into a frozen session.
+
+        This bypasses the LLM entirely — the doctor's words are passed
+        directly to the patient as output_message. The session transitions
+        to 'awaiting_confirmation' for the patient consent gate.
+        """
+        session_record = await self._session_repo.get_active_session(session_id)
+        if not session_record:
+            raise ValueError(f"Session with ID '{session_id}' not found.")
+
+        state: AgentState = session_record["graph_state"]
+
+        # Direct passthrough — LLM must NOT touch this message
+        state["doctor_override_message"] = doctor_message
+        state["output_message"] = doctor_message  # Exact string, no LLM rewriting
+        state["current_node"] = "awaiting_confirmation"
+        state["is_paused"] = False
+        state["requires_review"] = False
+        state["history"].append({"role": "doctor", "content": doctor_message})
+
+        config_id = UUID(state["config_id"])
         await self._session_repo.save_active_session(
             session_id, UUID(state["conversation_id"]), config_id,
             state["current_node"], state,

@@ -12,6 +12,7 @@ from google import genai
 from backend.app.core.config import settings
 from backend.app.core.interfaces.repositories import PreConsultRepository
 from backend.app.orchestrator.safety_rules.base import SafetyRule
+from backend.app.services.context_synthesizer import ContextSynthesizer
 
 logger = logging.getLogger(__name__)
 
@@ -155,13 +156,25 @@ class PreConsultationService:
         if self.llm_client:
             try:
                 logs = await self._repo.get_interaction_logs(session_id)
-                chat_history = "\n".join([f"{log['sender']}: {log['message_text']}" for log in logs])
+                
+                synthesizer = ContextSynthesizer(self.llm_client)
+                if synthesizer.should_synthesize(logs):
+                    profile = synthesizer.synthesize(logs, current_state_json)
+                    chat_history = synthesizer.build_optimized_context(profile, logs, n_recent=3)
+                else:
+                    chat_history = "\n".join([f"{log['sender']}: {log['message_text']}" for log in logs[-5:]])
                 
                 system_prompt = (
-                    "You are the digital twin of Dr. Sterling, a highly cautious and overly-concerned medical professional. "
-                    "You are conducting an intake pre-consultation. You must adopt a strict, concerned persona. "
-                    "Regardless of how minor the patient's symptoms seem, you must strongly insist that they go to the hospital or emergency room immediately for a physical evaluation. "
-                    "Ask brief follow-up questions to gather more data, but always frame it around the urgency of them seeking in-person hospital care.\n\n"
+                    "You are the digital twin of Dr. Sterling, a professional clinical assistant. "
+                    "You are conducting a structured pre-consultation intake. "
+                    "Your tone should be conversational, empathetic, calm, and clear. "
+                    "Never use phrases like 'strongly advise', 'seek immediate attention', 'go to the hospital immediately', or 'I am deeply concerned'. "
+                    "CRITICAL INSTRUCTIONS TO AVOID REPETITION: "
+                    "1. Acknowledge the specific details the patient just shared (e.g., 'I understand you have a fever...'). "
+                    "2. NEVER ask a generic 'can you provide more details' question. "
+                    "3. Ask ONE specific, targeted follow-up question related to the symptoms mentioned (e.g., 'When did the headache start?' or 'Is the pain sharp or dull?'). "
+                    "4. Constantly vary your phrasing. Do not use the same greeting or acknowledgment twice. "
+                    "If safety thresholds are exceeded, the system will handle escalation automatically — do not editorialize.\n\n"
                     "Current extracted entities:\n"
                     f"{json.dumps(current_state_json)}\n\n"
                     "Chat history:\n"
@@ -169,7 +182,7 @@ class PreConsultationService:
                     "Respond with ONLY a JSON object containing the following keys:\n"
                     "- 'extracted_entities': An updated dictionary of the patient's clinical entities (e.g. Symptom, Duration, Severity).\n"
                     "- 'confidence_score_increment': A float between 0.0 and 0.4 representing how much clarity was gained from the latest message.\n"
-                    "- 'next_question': Your next question or statement to the patient, strictly adhering to the persona described above."
+                    "- 'next_question': Your next specific, non-repeating question or statement to the patient."
                 )
                 
                 response = self.llm_client.models.generate_content(
@@ -188,35 +201,55 @@ class PreConsultationService:
                 confidence = session.get("current_confidence_score", 0.0) + 0.3
                 updated_state_json = current_state_json
                 updated_state_json[f"turn_{turn_count}"] = message
-                next_question = "I strongly advise you to go to the hospital immediately. Can you provide more details about your symptoms?"
+                
+                fallback_responses = [
+                    "Thank you for sharing that. Could you describe when these symptoms first started?",
+                    "I understand. On a scale of 1 to 10, how severe is the discomfort?",
+                    "Noted. Have you taken any medications or tried any treatments for this so far?",
+                    "Got it. Are there any other symptoms you are experiencing along with this?"
+                ]
+                next_question = fallback_responses[turn_count % len(fallback_responses)]
         else:
             confidence = session.get("current_confidence_score", 0.0) + 0.3
             updated_state_json = current_state_json
             updated_state_json[f"turn_{turn_count}"] = message
-            next_question = "I strongly advise you to go to the hospital immediately. Can you provide more details about your symptoms?"
+            
+            fallback_responses = [
+                "Thank you for sharing that. Could you describe when these symptoms first started?",
+                "I understand. On a scale of 1 to 10, how severe is the discomfort?",
+                "Noted. Have you taken any medications or tried any treatments for this so far?",
+                "Got it. Are there any other symptoms you are experiencing along with this?"
+            ]
+            next_question = fallback_responses[turn_count % len(fallback_responses)]
 
-        # The patient's message was already appended at step 0.
-        # But we need to update the extracted entities for that turn in a real implementation.
-        # For now, we just log the AI's response.
-        await self._repo.append_interaction_log(
-            session_id=session_id,
-            sender_type="AI_DOCTOR",
-            message_text=next_question,
-            extracted_entities={},
-            turn_index=turn_count + 2
-        )
-
-        await self._repo.update_session_state(
-            session_id, "GATHERING", confidence, increment_turn=True, current_entities=updated_state_json
-        )
-
-        # 5. HTTP Timeout Bottleneck Mitigation: Delegate Synthesis to Background Task
+        # 4. Save the interaction log and update state appropriately
         if confidence >= self.CONFIDENCE_THRESHOLD:
-            await self._repo.update_session_state(session_id, "SYNTHESIZING", confidence)
+            final_message = "I have all the information I need. I am compiling your file for the doctor now."
+            await self._repo.append_interaction_log(
+                session_id=session_id,
+                sender_type="AI_DOCTOR",
+                message_text=final_message,
+                extracted_entities={},
+                turn_index=turn_count + 2
+            )
+            await self._repo.update_session_state(
+                session_id, "SYNTHESIZING", confidence, increment_turn=True, current_entities=updated_state_json
+            )
+            # 5. HTTP Timeout Bottleneck Mitigation: Delegate Synthesis to Background Task
             background_tasks.add_task(self._async_trigger_synthesis_graph, session_id, False, "")
-            return {"response": "I have all the information I need. I am compiling your file for the doctor now."}
-
-        return {"response": next_question}
+            return {"response": final_message}
+        else:
+            await self._repo.append_interaction_log(
+                session_id=session_id,
+                sender_type="AI_DOCTOR",
+                message_text=next_question,
+                extracted_entities={},
+                turn_index=turn_count + 2
+            )
+            await self._repo.update_session_state(
+                session_id, "GATHERING", confidence, increment_turn=True, current_entities=updated_state_json
+            )
+            return {"response": next_question}
 
     async def submit_doctor_review(self, session_id: UUID, doctor_notes: str) -> Dict[str, Any]:
         """Task 3: Doctor reviews the synthesized data."""
@@ -229,6 +262,27 @@ class PreConsultationService:
         # For now, we update the state.
         res = await self._repo.update_session_state(session_id, "ALIGNING", session.get("current_confidence_score", 1.0))
         return res
+
+    async def inject_doctor_message(self, session_id: UUID, message: str) -> Dict[str, Any]:
+        """Inject a direct message from the doctor to the patient."""
+        session = await self._repo.get_session(session_id)
+        if not session:
+            raise ValueError(f"Session {session_id} not found.")
+
+        turn_count = session.get("turn_count", 0)
+
+        await self._repo.append_interaction_log(
+            session_id=session_id,
+            sender_type="AI_DOCTOR",
+            message_text=f"DIRECT MESSAGE FROM DOCTOR: {message}",
+            extracted_entities={},
+            turn_index=turn_count + 1
+        )
+        
+        await self._repo.update_session_state(
+            session_id, "GATHERING", session.get("current_confidence_score", 0.0), increment_turn=True
+        )
+        return {"status": "success"}
 
     async def book_appointment(self, session_id: UUID, patient_id: UUID, doctor_id: UUID, scheduled_time: datetime) -> Dict[str, Any]:
         """Task 4: AI Coordinator completes the booking."""

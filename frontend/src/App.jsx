@@ -650,7 +650,6 @@ export default function App() {
   // --- API Handlers ---
   const loadConfigFromDB = async (cid) => {
     if (apiStatus !== 'online') return;
-    setConfigLoading(true);
     try {
       const res = await fetch(`${API_BASE}/config/${cid}`);
       if (res.ok) {
@@ -665,19 +664,10 @@ export default function App() {
           }
           setIsFeasible(data.is_feasible);
           setValidationErrors(data.validation_errors || []);
-        } else {
-          // Config exists but has no steps — start empty
-          setSteps([]);
         }
-      } else if (res.status === 404) {
-        // No config saved yet for this ID — start with empty workflow
-        setSteps([]);
-        saveState('steps', []);
       }
     } catch (err) {
       console.error("Failed to load config dynamically", err);
-    } finally {
-      setConfigLoading(false);
     }
   };
 

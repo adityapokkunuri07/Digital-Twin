@@ -56,6 +56,7 @@ class SupabaseKnowledgeRepository(SupabaseClientMixin, KnowledgeRepository):
                 "tags": chunk.get("tags", []),
                 "synthetic_questions": chunk.get("synthetic_questions", []),
                 "embedding": chunk.get("embedding"),
+                "operational_mode": chunk.get("operational_mode", "LEARN"),
                 "metadata": metadata,
             })
 
@@ -67,7 +68,7 @@ class SupabaseKnowledgeRepository(SupabaseClientMixin, KnowledgeRepository):
             self.client.table("knowledge_chunks").insert(formatted_chunks).execute()
 
     async def match_knowledge_chunks(
-        self, embedding: List[float], threshold: float, limit: int
+        self, embedding: List[float], threshold: float, limit: int, operational_mode: str = None
     ) -> List[Dict[str, Any]]:
         if self.use_mock:
             # Simple mock cosine similarity simulation —
@@ -75,21 +76,24 @@ class SupabaseKnowledgeRepository(SupabaseClientMixin, KnowledgeRepository):
             all_chunks = []
             for config_chunks in self._knowledge_chunks.values():
                 for c in config_chunks:
+                    if operational_mode and c.get("operational_mode", "LEARN") != operational_mode:
+                        continue
                     c_copy = c.copy()
                     c_copy["similarity"] = 0.90  # default mocked score above threshold
                     all_chunks.append(c_copy)
             return all_chunks[:limit]
 
         # Call the Supabase pgvector match function (HNSW similarity search)
-        res = self.client.rpc("match_knowledge_chunks", {
+        res = self.client.rpc("match_knowledge_chunks_with_mode", {
             "query_embedding": embedding,
             "match_threshold": threshold,
             "match_count": limit,
+            "filter_mode": operational_mode,
         }).execute()
         return res.data if res.data else []
 
     async def match_knowledge_chunks_lexical(
-        self, query_text: str, threshold: float, limit: int
+        self, query_text: str, threshold: float, limit: int, operational_mode: str = None
     ) -> List[Dict[str, Any]]:
         if self.use_mock:
             # Mock trigram search simulation
@@ -97,6 +101,8 @@ class SupabaseKnowledgeRepository(SupabaseClientMixin, KnowledgeRepository):
             words = set(query_text.lower().split())
             for config_chunks in self._knowledge_chunks.values():
                 for c in config_chunks:
+                    if operational_mode and c.get("operational_mode", "LEARN") != operational_mode:
+                        continue
                     c_words = set(c["content"].lower().split())
                     common = words.intersection(c_words)
                     score = len(common) / max(len(words), 1)
@@ -108,10 +114,11 @@ class SupabaseKnowledgeRepository(SupabaseClientMixin, KnowledgeRepository):
                 matches, key=lambda x: x.get("lexical_score", 0), reverse=True
             )[:limit]
 
-        res = self.client.rpc("match_knowledge_chunks_lexical", {
+        res = self.client.rpc("match_knowledge_chunks_lexical_with_mode", {
             "query_text": query_text,
             "match_threshold": threshold,
             "match_limit": limit,
+            "filter_mode": operational_mode,
         }).execute()
         return res.data if res.data else []
 

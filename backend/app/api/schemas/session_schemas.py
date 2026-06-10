@@ -22,3 +22,8 @@ class BookAppointmentRequest(BaseModel):
     session_id: UUID
     preferred_date: str
     time_slot: str
+
+
+class DoctorInjectRequest(BaseModel):
+    """Request payload for injecting a doctor's message into a frozen session."""
+    message: str

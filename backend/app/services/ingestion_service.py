@@ -203,6 +203,22 @@ class StructuralRAGIngestionPipeline:
             
         return chunks
 
+    def _classify_operational_mode(self, title: str, content: str) -> str:
+        """Classify chunk into operational mode based on content heuristics."""
+        text = (title + " " + content).lower()
+        
+        execution_keywords = {"protocol", "procedure", "checklist", "step", "administer", "dosage", "intake"}
+        clarification_keywords = {"pricing", "faq", "explanation", "definition", "overview", "guide"}
+        troubleshooting_keywords = {"error", "complication", "adverse", "fallback", "exception", "warning"}
+        
+        if any(k in text for k in execution_keywords):
+            return "EXECUTION"
+        elif any(k in text for k in troubleshooting_keywords):
+            return "TROUBLESHOOTING"
+        elif any(k in text for k in clarification_keywords):
+            return "CLARIFICATION"
+        return "LEARN"
+
     def enrich_chunk(self, chunk: Dict[str, Any]) -> Dict[str, Any]:
         """
         Stage B: Intelligence Enrichment
@@ -242,6 +258,7 @@ class StructuralRAGIngestionPipeline:
         chunk["tags"] = list(tags)
         chunk["synthetic_questions"] = synthetic_questions
         chunk["embedding"] = emb
+        chunk["operational_mode"] = self._classify_operational_mode(title, content)
         return chunk
 
     async def ingest_raw_text(self, config_id: UUID, raw_text: str) -> List[Dict[str, Any]]:

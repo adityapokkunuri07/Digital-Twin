@@ -44,7 +44,9 @@ export default function PreConsultation() {
   }, [activeTab, patient]);
 
   // 2. Session State
-  const [sessionId, setSessionId] = useState(null);
+  const [sessionId, setSessionId] = useState(() => {
+    return localStorage.getItem('dt_session_id') || null;
+  });
   const [status, setStatus] = useState(null); // GATHERING, SYNTHESIZING, PENDING_REVIEW, ALIGNING, BOOKED
   const [turnCount, setTurnCount] = useState(0);
   const [confidence, setConfidence] = useState(0);
@@ -78,13 +80,26 @@ export default function PreConsultation() {
   useEffect(() => {
     if (!sessionId) return;
     
-    // Only poll when we expect a state transition from the backend
-    if (status === 'SYNTHESIZING' || status === 'SYNTHESIZING_PARTIAL') {
+    // Poll for status transitions and injected messages from doctor
+    if (status === 'SYNTHESIZING' || status === 'SYNTHESIZING_PARTIAL' || status === 'PENDING_REVIEW' || status === 'ALIGNING') {
       const interval = setInterval(async () => {
         try {
           const res = await fetch(`${API_BASE}/pre-consult/session/${sessionId}`);
           if (res.ok) {
             const data = await res.json();
+            
+            if (data.logs) {
+              setChatLog(prev => {
+                if (data.logs.length > prev.length) {
+                  return data.logs.map(log => ({
+                    sender: log.sender,
+                    text: log.message_text
+                  }));
+                }
+                return prev;
+              });
+            }
+
             if (data.session.status !== status) {
               setStatus(data.session.status);
               if (data.summary) {
@@ -99,6 +114,35 @@ export default function PreConsultation() {
       return () => clearInterval(interval);
     }
   }, [sessionId, status]);
+
+  // Hydrate session on load
+  useEffect(() => {
+    if (sessionId && chatLog.length === 0) {
+      fetch(`${API_BASE}/pre-consult/session/${sessionId}`)
+        .then(res => res.json())
+        .then(data => {
+          setStatus(data.session.status);
+          setConfidence(data.session.current_confidence_score);
+          setTurnCount(data.session.turn_count);
+          if (data.logs && data.logs.length > 0) {
+            const formattedLogs = data.logs.map(log => ({
+              sender: log.sender,
+              text: log.message_text
+            }));
+            setChatLog(formattedLogs);
+          } else {
+            // Fallback initial greeting if logs are empty somehow
+            setChatLog([{ sender: 'AI_DOCTOR', text: "Hello! I am Dr. Sterling's AI assistant. To help the doctor prepare, could you briefly describe your symptoms today?" }]);
+          }
+          if (data.summary) {
+            setSynthesisData(data.summary);
+          }
+        })
+        .catch(err => {
+          console.error("Failed to restore session", err);
+        });
+    }
+  }, [sessionId]);
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -130,6 +174,7 @@ export default function PreConsultation() {
     setStatus(null);
     setChatLog([]);
     localStorage.removeItem('dt_patient');
+    localStorage.removeItem('dt_session_id');
   };
 
   const startSession = async () => {
@@ -141,6 +186,7 @@ export default function PreConsultation() {
       });
       const data = await res.json();
       setSessionId(data.session_id);
+      localStorage.setItem('dt_session_id', data.session_id);
       setStatus(data.status);
       setConfidence(data.current_confidence_score);
       setChatLog([{ sender: 'AI_DOCTOR', text: "Hello! I am Dr. Sterling's AI assistant. To help the doctor prepare, could you briefly describe your symptoms today?" }]);
