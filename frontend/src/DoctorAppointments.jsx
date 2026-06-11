@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, User, Clock, CheckCircle2, ChevronRight, AlertCircle, X, FileText, Activity, MessageSquare } from 'lucide-react';
 
-const API_BASE = "http://localhost:8000/api";
+const API_BASE = "http://127.0.0.1:8000/api";
 
 export default function DoctorAppointments() {
   const [appointments, setAppointments] = useState([]);

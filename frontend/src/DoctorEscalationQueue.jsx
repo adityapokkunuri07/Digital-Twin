@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, ShieldCheck, Stethoscope, FileText, CheckCircle2 } from 'lucide-react';
 
-const API_BASE = "http://localhost:8000/api";
+const API_BASE = "http://127.0.0.1:8000/api";
 
 export default function DoctorEscalationQueue() {
   const [queue, setQueue] = useState([]);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, User, Stethoscope, Clock, ShieldCheck, Activity, Calendar, FileText, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 
-const API_BASE = "http://localhost:8000/api";
+const API_BASE = "http://127.0.0.1:8000/api";
 
 export default function PreConsultation() {
   // 1. Auth State

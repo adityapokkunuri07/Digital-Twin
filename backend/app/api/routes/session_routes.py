@@ -37,6 +37,22 @@ async def query_session(
     orch: ZeroTrustOrchestrator = Depends(get_orchestrator),
 ):
     """Send a user query to an active session for state machine processing."""
+    
+    # --- KNOWLEDGE ENGINE INTERCEPTION ---
+    if "[Document Attached:" in payload.query:
+        import re
+        from backend.app.services.task_assembler import TaskAssembler
+        # Fallback expert ID for demo
+        expert_id = "default-expert-id"
+        matched_task = "Generate Briefs" # Hardcoded for demo parity
+        
+        try:
+            assembler = TaskAssembler()
+            blueprint = assembler.assemble_blueprint(matched_task, expert_id)
+            print(f"[SESSION_ROUTE] Intercepted Document, Assembled Blueprint: {blueprint}")
+        except Exception as e:
+            print(f"[SESSION_ROUTE] Assembly failed: {e}")
+
     state = await orch.run_step(payload.session_id, payload.query)
     return state
 

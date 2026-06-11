@@ -10,8 +10,9 @@ import {
 import PreConsultation from './PreConsultation';
 import DoctorEscalationQueue from './DoctorEscalationQueue';
 import DoctorAppointments from './DoctorAppointments';
+import SkillsPage from './pages/SkillsPage';
 
-const API_BASE = "http://localhost:8000/api";
+const API_BASE = "http://127.0.0.1:8000/api";
 const DOCTOR_ID = "4a8f39b6-89d1-4db8-bbbe-d9616e00b8e2";
 
 const uuid4 = () => {
@@ -497,7 +498,8 @@ export default function App() {
       'workflow': 'workflow',
       'rag-ingestion': 'rag',
       'obsidian-mapping': 'obsidian',
-      'escalation': 'escalation'
+      'escalation': 'escalation',
+      'skills': 'skills'
     };
     if (routeMap[path]) return routeMap[path];
 
@@ -511,7 +513,8 @@ export default function App() {
       'workflow': 'clinical-control-plane/workflow',
       'rag': 'clinical-control-plane/rag-ingestion',
       'obsidian': 'clinical-control-plane/obsidian-mapping',
-      'escalation': 'clinical-control-plane/escalation'
+      'escalation': 'clinical-control-plane/escalation',
+      'skills': 'clinical-control-plane/skills'
     };
     if (window.location.pathname.startsWith('/clinical-control-plane')) {
       const newPath = `/${tabToRoute[activeTab] || 'clinical-control-plane/workflow'}`;
@@ -538,6 +541,7 @@ export default function App() {
     if (window.location.pathname.includes('rag-ingestion')) setActiveTab('rag');
     else if (window.location.pathname.includes('obsidian-mapping')) setActiveTab('obsidian');
     else if (window.location.pathname.includes('pre-consult')) setActiveTab('pre-consult');
+    else if (window.location.pathname.includes('skills')) setActiveTab('skills');
     else if (window.location.pathname.includes('workflow')) setActiveTab('workflow');
 
     return () => window.removeEventListener('popstate', handlePopState);
@@ -636,7 +640,7 @@ export default function App() {
 
   const checkBackend = async () => {
     try {
-      const res = await fetch("http://localhost:8000/");
+      const res = await fetch("http://127.0.0.1:8000/");
       if (res.ok) {
         setApiStatus('online');
       } else {
@@ -1378,6 +1382,14 @@ ${file.content || ''}
             <span>Schedule</span>
           </button>
 
+          <button
+            className={`nav-link w-full ${activeTab === 'skills' ? 'active' : ''}`}
+            onClick={() => setActiveTab('skills')}
+          >
+            <Activity size={18} style={{ color: activeTab === 'skills' ? 'inherit' : 'var(--primary)' }} />
+            <span>Skills Framework</span>
+          </button>
+
 
           <button
             className="nav-link w-full"
@@ -1399,6 +1411,11 @@ ${file.content || ''}
         <h1 style={{ fontSize: '32px', fontFamily: 'var(--font-display)', marginBottom: '32px' }}>
           Expert Proxy Control Plane
         </h1>
+
+        {/* SKILLS FRAMEWORK TAB */}
+        {activeTab === 'skills' && (
+          <SkillsPage />
+        )}
 
         {/* WORKFLOW BUILDER TAB */}
         {activeTab === 'workflow' && (

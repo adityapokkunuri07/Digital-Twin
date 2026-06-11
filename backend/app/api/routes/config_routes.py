@@ -64,16 +64,6 @@ def apply_ai_structure(raw_text: str, client: genai.Client) -> str:
         return raw_text
 
 
-@router.get("/{config_id}")
-async def get_config(
-    config_id: UUID,
-    config_svc: ConfigService = Depends(get_config_service),
-):
-    """Retrieve an expert twin configuration by its ID."""
-    config = await config_svc.get_config(config_id)
-    if not config:
-        raise HTTPException(status_code=404, detail="Configuration not found")
-    return config
 
 
 @router.post("/validate")
@@ -356,3 +346,15 @@ async def sync_obsidian(
         })
 
     return {"status": "success", "files": files_response}
+
+
+@router.get("/{config_id}")
+async def get_config(
+    config_id: UUID,
+    config_svc: ConfigService = Depends(get_config_service),
+):
+    """Retrieve an expert twin configuration by its ID."""
+    config = await config_svc.get_config(config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="Configuration not found")
+    return config
