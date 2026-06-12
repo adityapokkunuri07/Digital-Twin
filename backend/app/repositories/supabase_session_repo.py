@@ -95,3 +95,11 @@ class SupabaseSessionRepository(SupabaseClientMixin, SessionRepository):
 
         res = self.client.table("execution_traces").insert(record).execute()
         return res.data[0] if res.data else record
+
+    async def get_execution_traces(self, session_id: UUID) -> List[Dict[str, Any]]:
+        sid_str = str(session_id)
+        if self.use_mock:
+            return [t for t in self._traces if t["session_id"] == sid_str]
+            
+        res = self.client.table("execution_traces").select("*").eq("session_id", sid_str).order("created_at", desc=False).execute()
+        return res.data if res.data else []

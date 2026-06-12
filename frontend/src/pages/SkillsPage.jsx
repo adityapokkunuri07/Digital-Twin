@@ -12,7 +12,7 @@ export default function SkillsPage() {
             <div>
               <h1 style={{ fontSize: 24, fontWeight: 700, color: '#F8FAFC' }}>Twin Brain</h1>
               <p style={{ color: '#94A3B8', fontSize: 13.5, marginTop: 4 }}>
-                Digital Twin Brain & Blueprint Assembly Module
+                Digital Twin Brain — Workflow Architecture &amp; Knowledge Traceability
               </p>
             </div>
           </div>
@@ -20,12 +20,20 @@ export default function SkillsPage() {
 
         {/* Content */}
         <div className="fade-up">
-          <div className="bg-[#1E293B] rounded-xl border border-[#334155] p-6 shadow-lg mb-8">
+          <div style={{ background: '#1E293B', borderRadius: 12, border: '1px solid #334155', padding: 24, marginBottom: 8 }}>
             <TwinBrainAccordion />
-            <div style={{ paddingTop: 32 }}>
-               <h3 style={{ fontSize: 14, color: '#94A3B8', marginBottom: 16 }}>Execution Event Log</h3>
-               <KnowledgeProofsViewer />
+          </div>
+
+          <div style={{ background: '#1E293B', borderRadius: 12, border: '1px solid #334155', padding: 24, marginTop: 16 }}>
+            <div style={{ marginBottom: 18 }}>
+              <h3 style={{ fontSize: 15, fontWeight: 700, color: '#F8FAFC', margin: '0 0 4px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+                🔍 Knowledge Traceability — Session Execution Log
+              </h3>
+              <p style={{ fontSize: 13, color: '#64748B', margin: 0 }}>
+                Every step the Twin took, which knowledge chunks it retrieved, and the response it generated — live, per session.
+              </p>
             </div>
+            <KnowledgeProofsViewer />
           </div>
         </div>
 

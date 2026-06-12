@@ -302,3 +302,70 @@ async def get_knowledge_proofs():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/workflows/session-traces/{session_id}")
+async def get_session_traces(session_id: str):
+    """
+    Fetches real execution traces for a session and enriches them with
+    retrieved knowledge chunk content — the 'proof' of what the Twin used.
+    Falls back to in-memory mock repos when Supabase is unavailable.
+    """
+    from backend.app.api.dependencies import provider
+    import traceback as _traceback
+
+    session_repo = provider._session_repo
+    knowledge_repo = provider._knowledge_repo
+
+    try:
+        # 1. Fetch all execution traces for this session
+        traces = await session_repo.get_execution_traces(session_id)
+
+        # 2. For each trace, enrich with the actual knowledge chunk content
+        enriched = []
+        for trace in traces:
+            chunk_ids = trace.get("retrieved_chunk_ids", []) or []
+            chunks = []
+
+            for cid in chunk_ids:
+                # Try in-memory mock first
+                if knowledge_repo.use_mock:
+                    for config_chunks in knowledge_repo._knowledge_chunks.values():
+                        for c in config_chunks:
+                            if str(c.get("chunk_id", "")) == str(cid):
+                                chunks.append({
+                                    "chunk_id": c["chunk_id"],
+                                    "title": c.get("title", ""),
+                                    "content": c.get("content", ""),
+                                    "tags": c.get("tags", []),
+                                    "parent_path": c.get("parent_path", ""),
+                                })
+                else:
+                    # Supabase live query
+                    try:
+                        db = SupabaseService()
+                        chunk_res = db.client.table("knowledge_chunks").select(
+                            "chunk_id, title, content, tags, parent_path"
+                        ).eq("chunk_id", str(cid)).limit(1).execute()
+                        if chunk_res.data:
+                            chunks.append(chunk_res.data[0])
+                    except Exception:
+                        pass  # Non-fatal if chunk not found
+
+            enriched.append({
+                "trace_id": trace.get("trace_id"),
+                "step_name": trace.get("step_name", "unknown"),
+                "prompt_used": trace.get("prompt_used", ""),
+                "response_generated": trace.get("response_generated", ""),
+                "classification_score": trace.get("classification_score", 0.0),
+                "created_at": trace.get("created_at", ""),
+                "retrieved_chunks": chunks,
+                "chunk_count": len(chunks),
+            })
+
+        return {"status": "success", "session_id": session_id, "traces": enriched}
+
+    except Exception as e:
+        _traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+

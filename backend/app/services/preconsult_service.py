@@ -76,19 +76,21 @@ class PreConsultationService:
             
         summary = None
         if session.get("status") in ["PENDING_REVIEW", "ALIGNING", "BOOKED"]:
-            # In a real app, query `pre_consult_summaries` table.
-            # Mocking here for simulation based on current entities.
             summary = {
                 "structured_clinical_data": session.get("current_extracted_entities", {}),
                 "doctor_review_notes": session.get("doctor_review_notes", None)
             }
             
         logs = await self._repo.get_interaction_logs(session_id)
+        traces = await self._orchestrator._session_repo.get_execution_traces(session_id)
+        active_session = await self._orchestrator._session_repo.get_active_session(session_id)
         
         return {
             "session": session,
             "summary": summary,
-            "logs": logs
+            "logs": logs,
+            "traces": traces,
+            "graph_state": active_session.get("graph_state", {}) if active_session else {}
         }
 
     async def get_pending_queue(self) -> List[Dict[str, Any]]:
