@@ -47,12 +47,21 @@ class PreConsultationService:
     async def start_session(self, patient_id: UUID, config_id: UUID) -> Dict[str, Any]:
         """Task 1 Init: Create a new session."""
         session = await self._repo.create_session(patient_id, config_id)
+        session_id = UUID(session["session_id"])
+        
+        # Initialize LangGraph state machine with the same session ID
+        state = await self._orchestrator.initialize_session(
+            conversation_id=session_id, 
+            config_id=config_id,
+            session_id=session_id
+        )
+        greeting = state["output_message"]
         
         # Save the initial greeting
         await self._repo.append_interaction_log(
-            session_id=UUID(session["session_id"]),
+            session_id=session_id,
             sender_type="AI_DOCTOR",
-            message_text="Hello! I am Dr. Sterling's AI assistant. To help the doctor prepare, could you briefly describe your symptoms today?",
+            message_text=greeting,
             extracted_entities={},
             turn_index=0
         )
@@ -115,7 +124,6 @@ class PreConsultationService:
         if not session:
             raise ValueError(f"Session {session_id} not found.")
 
-        current_state_json = session.get("current_extracted_entities", {})
         turn_count = session.get("turn_count", 0)
 
         # 0. Save the patient's raw message immediately
@@ -127,129 +135,81 @@ class PreConsultationService:
             turn_index=turn_count + 1
         )
 
-        # 1. Zero-Trust Emergency Triage Gate BEFORE processing
-        for rule in self._safety_rules:
-            is_anomaly, reason = rule.evaluate({"message": message}, classification_score=1.0)
-            if is_anomaly:
-                # Also log the system's triage alert
-                await self._repo.append_interaction_log(
-                    session_id=session_id,
-                    sender_type="AI_DOCTOR",
-                    message_text=f"Emergency Triage Triggered: {reason}. Compiling file for immediate human review.",
-                    extracted_entities={},
-                    turn_index=turn_count + 2
-                )
-                
-                # Force partial synthesis trap and delegate to LangGraph background task
-                await self._repo.update_session_state(session_id, "SYNTHESIZING_PARTIAL", 1.0)
-                background_tasks.add_task(self._async_trigger_synthesis_graph, session_id, True, f"Emergency Triage: {reason}")
-                return {"alert": f"Emergency Triage Triggered: {reason}. Compiling file for immediate human review."}
+        # 0.5 Greeting Bypass
+        lower_msg = message.strip().lower()
+        if len(lower_msg.split()) < 6 and any(greet in lower_msg for greet in ["hi", "hello", "hey", "hii", "heyy"]):
+            output_msg = "Hello! I am Dr. Sterling's AI assistant. To help the doctor prepare, could you briefly describe your symptoms today?"
+            await self._repo.append_interaction_log(
+                session_id=session_id,
+                sender_type="AI_DOCTOR",
+                message_text=output_msg,
+                extracted_entities={},
+                turn_index=turn_count + 2
+            )
+            await self._repo.update_session_state(session_id, "GATHERING", 1.0, increment_turn=True)
+            return {"response": output_msg}
 
-        # 2. Circuit Breaker for Knowledge Saturation Loop
-        if turn_count >= self.MAX_TURNS_CIRCUIT_BREAKER:
-            # Force partial synthesis trap and delegate to LangGraph background task
-            await self._repo.update_session_state(session_id, "SYNTHESIZING_PARTIAL", session.get("current_confidence_score", 0.0))
-            background_tasks.add_task(self._async_trigger_synthesis_graph, session_id, True, "Max turns reached")
-            return {"alert": "Maximum turns reached. Compiling file for human review."}
+        # Zero-Trust execution via LangGraph Orchestrator
+        try:
+            # Fallback initialization for older sessions
+            session_record = await self._orchestrator._session_repo.get_active_session(session_id)
+            if not session_record:
+                await self._orchestrator.initialize_session(
+                    conversation_id=session_id, 
+                    config_id=UUID(session["config_id"]),
+                    session_id=session_id
+                )
 
-        # 3. LLM-Driven Extraction and Confidence Scoring
-        if self.llm_client:
-            try:
-                logs = await self._repo.get_interaction_logs(session_id)
-                
-                synthesizer = ContextSynthesizer(self.llm_client)
-                if synthesizer.should_synthesize(logs):
-                    profile = synthesizer.synthesize(logs, current_state_json)
-                    chat_history = synthesizer.build_optimized_context(profile, logs, n_recent=3)
-                else:
-                    chat_history = "\n".join([f"{log['sender']}: {log['message_text']}" for log in logs[-5:]])
-                
-                system_prompt = (
-                    "You are the digital twin of Dr. Sterling, a professional clinical assistant. "
-                    "You are conducting a structured pre-consultation intake. "
-                    "Your tone should be conversational, empathetic, calm, and clear. "
-                    "Never use phrases like 'strongly advise', 'seek immediate attention', 'go to the hospital immediately', or 'I am deeply concerned'. "
-                    "CRITICAL INSTRUCTIONS TO AVOID REPETITION: "
-                    "1. Acknowledge the specific details the patient just shared (e.g., 'I understand you have a fever...'). "
-                    "2. NEVER ask a generic 'can you provide more details' question. "
-                    "3. Ask ONE specific, targeted follow-up question related to the symptoms mentioned (e.g., 'When did the headache start?' or 'Is the pain sharp or dull?'). "
-                    "4. Constantly vary your phrasing. Do not use the same greeting or acknowledgment twice. "
-                    "If safety thresholds are exceeded, the system will handle escalation automatically — do not editorialize.\n\n"
-                    "Current extracted entities:\n"
-                    f"{json.dumps(current_state_json)}\n\n"
-                    "Chat history:\n"
-                    f"{chat_history}\n\n"
-                    "Respond with ONLY a JSON object containing the following keys:\n"
-                    "- 'extracted_entities': An updated dictionary of the patient's clinical entities (e.g. Symptom, Duration, Severity).\n"
-                    "- 'confidence_score_increment': A float between 0.0 and 0.4 representing how much clarity was gained from the latest message.\n"
-                    "- 'next_question': Your next specific, non-repeating question or statement to the patient."
-                )
-                
-                response = self.llm_client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=[system_prompt],
-                    config={"response_mime_type": "application/json"}
-                )
-                
-                response_data = json.loads(response.text)
-                confidence_increment = float(response_data.get("confidence_score_increment", 0.1))
-                confidence = session.get("current_confidence_score", 0.0) + confidence_increment
-                updated_state_json = response_data.get("extracted_entities", current_state_json)
-                next_question = response_data.get("next_question", "Please go to the hospital immediately. Can you tell me more about what you are feeling?")
-            except Exception as e:
-                logger.error(f"LLM integration failed: {e}")
-                confidence = session.get("current_confidence_score", 0.0) + 0.3
-                updated_state_json = current_state_json
-                updated_state_json[f"turn_{turn_count}"] = message
-                
-                fallback_responses = [
-                    "Thank you for sharing that. Could you describe when these symptoms first started?",
-                    "I understand. On a scale of 1 to 10, how severe is the discomfort?",
-                    "Noted. Have you taken any medications or tried any treatments for this so far?",
-                    "Got it. Are there any other symptoms you are experiencing along with this?"
-                ]
-                next_question = fallback_responses[turn_count % len(fallback_responses)]
-        else:
-            confidence = session.get("current_confidence_score", 0.0) + 0.3
-            updated_state_json = current_state_json
-            updated_state_json[f"turn_{turn_count}"] = message
+            state = await self._orchestrator.run_step(session_id, message)
             
-            fallback_responses = [
-                "Thank you for sharing that. Could you describe when these symptoms first started?",
-                "I understand. On a scale of 1 to 10, how severe is the discomfort?",
-                "Noted. Have you taken any medications or tried any treatments for this so far?",
-                "Got it. Are there any other symptoms you are experiencing along with this?"
-            ]
-            next_question = fallback_responses[turn_count % len(fallback_responses)]
-
-        # 4. Save the interaction log and update state appropriately
-        if confidence >= self.CONFIDENCE_THRESHOLD:
-            final_message = "I have all the information I need. I am compiling your file for the doctor now."
+            output_msg = state.get("output_message", "I am processing your information.")
+            is_paused = state.get("is_paused", False)
+            current_node = state.get("current_node", "")
+            
             await self._repo.append_interaction_log(
                 session_id=session_id,
                 sender_type="AI_DOCTOR",
-                message_text=final_message,
-                extracted_entities={},
+                message_text=output_msg,
+                extracted_entities=state.get("gathered_data", {}),
                 turn_index=turn_count + 2
             )
-            await self._repo.update_session_state(
-                session_id, "SYNTHESIZING", confidence, increment_turn=True, current_entities=updated_state_json
-            )
-            # 5. HTTP Timeout Bottleneck Mitigation: Delegate Synthesis to Background Task
-            background_tasks.add_task(self._async_trigger_synthesis_graph, session_id, False, "")
-            return {"response": final_message}
-        else:
+            
+            # Map graph state to PreConsultation UI state
+            if is_paused:
+                # Triggers doctor review UI
+                await self._repo.update_session_state(
+                    session_id, "PENDING_REVIEW", state.get("classification_score", 1.0),
+                    increment_turn=True, current_entities=state.get("gathered_data", {})
+                )
+                return {"response": output_msg, "alert": "Session suspended for human review."}
+                
+            elif current_node == "action_dispatch":
+                # Dispatched
+                await self._repo.update_session_state(
+                    session_id, "SYNTHESIZING", 1.0, 
+                    increment_turn=True, current_entities=state.get("gathered_data", {})
+                )
+                background_tasks.add_task(self._async_trigger_synthesis_graph, session_id, False, "Completed Workflow")
+                return {"response": output_msg}
+                
+            else:
+                await self._repo.update_session_state(
+                    session_id, "GATHERING", state.get("classification_score", 0.5), 
+                    increment_turn=True, current_entities=state.get("gathered_data", {})
+                )
+                return {"response": output_msg}
+        except Exception as e:
+            logger.error(f"Orchestrator error: {e}", exc_info=True)
+            fallback_msg = f"ERROR: {type(e).__name__} - {str(e)}"
             await self._repo.append_interaction_log(
                 session_id=session_id,
                 sender_type="AI_DOCTOR",
-                message_text=next_question,
+                message_text=fallback_msg,
                 extracted_entities={},
                 turn_index=turn_count + 2
             )
-            await self._repo.update_session_state(
-                session_id, "GATHERING", confidence, increment_turn=True, current_entities=updated_state_json
-            )
-            return {"response": next_question}
+            await self._repo.update_session_state(session_id, "GATHERING", 0.0, increment_turn=True)
+            return {"response": fallback_msg}
 
     async def submit_doctor_review(self, session_id: UUID, doctor_notes: str) -> Dict[str, Any]:
         """Task 3: Doctor reviews the synthesized data."""
@@ -279,6 +239,21 @@ class PreConsultationService:
             turn_index=turn_count + 1
         )
         
+        # Inject into LangGraph state history so LLM has context
+        session_record = await self._orchestrator._session_repo.get_active_session(session_id)
+        if session_record:
+            state = session_record["graph_state"]
+            state["history"].append({"role": "doctor", "content": f"DIRECT MESSAGE FROM DOCTOR: {message}"})
+            # Unpause the session so the patient can respond
+            state["is_paused"] = False
+            state["requires_review"] = False
+            state["current_node"] = "action_dispatch" # Or keep GATHERING
+            await self._orchestrator._session_repo.save_active_session(
+                session_id, UUID(state["conversation_id"]), UUID(state["config_id"]),
+                state["current_node"], state,
+                state["is_paused"], state["requires_review"]
+            )
+            
         await self._repo.update_session_state(
             session_id, "GATHERING", session.get("current_confidence_score", 0.0), increment_turn=True
         )

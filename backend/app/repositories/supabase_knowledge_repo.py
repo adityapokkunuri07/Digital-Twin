@@ -8,6 +8,7 @@ Single Responsibility: Only knowledge chunk operations.
 from typing import List, Dict, Any, Optional
 from uuid import UUID, uuid4
 import logging
+import json
 
 from backend.app.core.interfaces.repositories import KnowledgeRepository
 from backend.app.repositories.base import SupabaseClientMixin
@@ -56,7 +57,6 @@ class SupabaseKnowledgeRepository(SupabaseClientMixin, KnowledgeRepository):
                 "tags": chunk.get("tags", []),
                 "synthetic_questions": chunk.get("synthetic_questions", []),
                 "embedding": chunk.get("embedding"),
-                "operational_mode": chunk.get("operational_mode", "LEARN"),
                 "metadata": metadata,
             })
 
@@ -83,14 +83,53 @@ class SupabaseKnowledgeRepository(SupabaseClientMixin, KnowledgeRepository):
                     all_chunks.append(c_copy)
             return all_chunks[:limit]
 
-        # Call the Supabase pgvector match function (HNSW similarity search)
-        res = self.client.rpc("match_knowledge_chunks_with_mode", {
-            "query_embedding": embedding,
-            "match_threshold": threshold,
-            "match_count": limit,
-            "filter_mode": operational_mode,
-        }).execute()
-        return res.data if res.data else []
+        # Try new RPC with mode filtering
+        # Try new RPC with mode filtering
+        try:
+            res = self.client.rpc("match_knowledge_chunks_with_mode", {
+                "query_embedding": embedding,
+                "match_threshold": threshold,
+                "match_count": limit,
+                "filter_mode": operational_mode,
+            }).execute()
+            return res.data if res.data else []
+        except Exception as e:
+            if "PGRST202" in str(e):
+                logger.warning("match_knowledge_chunks_with_mode RPC not found. Falling back to old RPC.")
+                try:
+                    res = self.client.rpc("match_knowledge_chunks", {
+                        "query_embedding": embedding,
+                        "match_threshold": threshold,
+                        "match_count": limit
+                    }).execute()
+                    # Post-filter in python if needed
+                    data = res.data if res.data else []
+                    if operational_mode:
+                        data = [d for d in data if d.get("operational_mode", "LEARN") == operational_mode]
+                    return data
+                except Exception as e2:
+                    if "PGRST202" in str(e2):
+                        logger.warning("match_knowledge_chunks RPC also not found. Using in-memory fallback.")
+                        import numpy as np
+                        # Fetch all chunks and calculate similarity in python
+                        all_res = self.client.table("knowledge_chunks").select("*").execute()
+                        matches = []
+                        q_vec = np.array(embedding)
+                        for c in all_res.data:
+                            if operational_mode and c.get("metadata", {}).get("operational_mode", "LEARN") != operational_mode:
+                                continue
+                            if not c.get("embedding"):
+                                continue
+                            c_vec = np.array(json.loads(c["embedding"]) if isinstance(c["embedding"], str) else c["embedding"])
+                            sim = np.dot(q_vec, c_vec) / (np.linalg.norm(q_vec) * np.linalg.norm(c_vec))
+                            if sim >= threshold:
+                                c_copy = c.copy()
+                                c_copy["similarity"] = float(sim)
+                                c_copy["combined_score"] = float(sim)
+                                matches.append(c_copy)
+                        return sorted(matches, key=lambda x: x["similarity"], reverse=True)[:limit]
+                    raise
+            raise
 
     async def match_knowledge_chunks_lexical(
         self, query_text: str, threshold: float, limit: int, operational_mode: str = None
@@ -114,13 +153,49 @@ class SupabaseKnowledgeRepository(SupabaseClientMixin, KnowledgeRepository):
                 matches, key=lambda x: x.get("lexical_score", 0), reverse=True
             )[:limit]
 
-        res = self.client.rpc("match_knowledge_chunks_lexical_with_mode", {
-            "query_text": query_text,
-            "match_threshold": threshold,
-            "match_limit": limit,
-            "filter_mode": operational_mode,
-        }).execute()
-        return res.data if res.data else []
+        try:
+            res = self.client.rpc("match_knowledge_chunks_lexical_with_mode", {
+                "query_text": query_text,
+                "match_threshold": threshold,
+                "match_limit": limit,
+                "filter_mode": operational_mode,
+            }).execute()
+            return res.data if res.data else []
+        except Exception as e:
+            if "PGRST202" in str(e):
+                logger.warning("match_knowledge_chunks_lexical_with_mode RPC not found. Falling back to old RPC.")
+                try:
+                    res = self.client.rpc("match_knowledge_chunks_lexical", {
+                        "query_text": query_text,
+                        "match_threshold": threshold,
+                        "match_limit": limit
+                    }).execute()
+                    data = res.data if res.data else []
+                    if operational_mode:
+                        data = [d for d in data if d.get("operational_mode", "LEARN") == operational_mode]
+                    return data
+                except Exception as e2:
+                    if "PGRST202" in str(e2):
+                        logger.warning("match_knowledge_chunks_lexical RPC also not found. Using in-memory fallback.")
+                        # Fetch all chunks and calculate lexical in python
+                        all_res = self.client.table("knowledge_chunks").select("*").execute()
+                        matches = []
+                        words = set(query_text.lower().split())
+                        for c in all_res.data:
+                            if operational_mode and c.get("metadata", {}).get("operational_mode", "LEARN") != operational_mode:
+                                continue
+                            c_content = c.get("content", "")
+                            c_words = set(c_content.lower().split())
+                            common = words.intersection(c_words)
+                            score = len(common) / max(len(words), 1)
+                            if score > threshold or query_text.lower() in c_content.lower():
+                                c_copy = c.copy()
+                                c_copy["lexical_score"] = max(score, 0.88)
+                                c_copy["combined_score"] = max(score, 0.88)
+                                matches.append(c_copy)
+                        return sorted(matches, key=lambda x: x.get("lexical_score", 0), reverse=True)[:limit]
+                    raise
+            raise
 
     async def get_knowledge_chunk_by_path(
         self, config_id: UUID, parent_path: str

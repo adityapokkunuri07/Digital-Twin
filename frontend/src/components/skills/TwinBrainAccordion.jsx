@@ -60,6 +60,19 @@ function TaskReactFlowGraph({ task, taskIdx, taskSkills, knowGroupsBySkill }) {
         allKnowledge.push(...kNodes);
     });
 
+    // Helper to map Skill Title to Backend Wrapper Function
+    const getToolNameForSkill = (title) => {
+        const lower = (title || "").toLowerCase();
+        if (lower.includes('vital') || lower.includes('symptom') || lower.includes('profiling')) {
+            return "ClinicalServicesWrapper.extract_vitals()";
+        } else if (lower.includes('blood pressure') || lower.includes('fever') || lower.includes('acs') || lower.includes('risk')) {
+            return "ClinicalServicesWrapper.synthesize_report()";
+        } else if (lower.includes('escalation') || lower.includes('treatment') || lower.includes('dispatch') || lower.includes('action')) {
+            return "EmailServiceWrapper.send_communication()";
+        }
+        return "BaseWrapper.execute()";
+    };
+
     // 1. Task Node (Center)
     nodes.push({
         id: `task-${task.id}`,
@@ -98,7 +111,19 @@ function TaskReactFlowGraph({ task, taskIdx, taskSkills, knowGroupsBySkill }) {
                             <span>⚙️</span>
                             <strong style={{ color: '#A5B4FC' }}>Skill (Execution Tool)</strong>
                         </div>
-                        <div style={{ fontSize: '13px' }}>{skill.title}</div>
+                        <div style={{ fontSize: '13px', marginBottom: '6px' }}>{skill.title}</div>
+                        <div style={{ 
+                            background: 'rgba(0,0,0,0.3)', 
+                            padding: '4px 6px', 
+                            borderRadius: '4px', 
+                            fontSize: '9px', 
+                            color: '#93C5FD',
+                            fontFamily: 'monospace',
+                            border: '1px solid rgba(147, 197, 253, 0.2)',
+                            wordBreak: 'break-all'
+                        }}>
+                            {getToolNameForSkill(skill.title)}
+                        </div>
                     </div>
                 )
             },

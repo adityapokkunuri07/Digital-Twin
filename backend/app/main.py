@@ -8,8 +8,10 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+import traceback
 
 from backend.app.core.config import settings
 from backend.app.core.middleware import PIISanitizationMiddleware
@@ -56,3 +58,12 @@ async def startup_event():
 @app.get("/")
 def read_root():
     return {"message": "Digital Twin Engine active. Version 1.0.0"}
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    with open("error_trace.log", "w") as f:
+        f.write(traceback.format_exc())
+    return JSONResponse(
+        status_code=500,
+        content={"message": "Internal server error. Stack trace dumped to error_trace.log"}
+    )

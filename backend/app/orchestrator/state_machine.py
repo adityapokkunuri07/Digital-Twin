@@ -175,10 +175,10 @@ class ZeroTrustOrchestrator:
         self._embedding_service = embedding_service
 
     async def initialize_session(
-        self, conversation_id: UUID, config_id: UUID
+        self, conversation_id: UUID, config_id: UUID, session_id: UUID | None = None
     ) -> Dict[str, Any]:
         """Create a new execution session with a clean initial state."""
-        session_id = uuid4()
+        session_id = session_id or uuid4()
 
         # Load doctor name from config to personalize the greeting
         config_record = await self._config_repo.get_expert_config(config_id)
@@ -404,13 +404,22 @@ class ZeroTrustOrchestrator:
         # PHASE 1: DATA GATHERING NODE
         evaluate_phase_steps("data_gathering", eval_context=optimized_context)
 
+        # Context Retrieval via Hybrid RAG for dynamic data gathering
+        context, selected_chunks, rejected = await self._rag_engine.retrieve_context(
+            config_id, user_query, operational_mode="LEARN",
+        )
+        state["retrieved_context"] = context
+        combined_context = f"{optimized_context}\n\n--- CLINICAL GUIDELINES ---\n{context}" if context else optimized_context
+
         # Check if we're still missing root variables
         missing_root_inputs = [
             x for x in root_inputs
             if x not in state["gathered_data"]
         ]
-
-        selected_chunks = []
+        
+        # If no strict workflow is defined, use the LLM to dynamically determine missing data from RAG guidelines
+        if not missing_root_inputs and not root_inputs and context and self._llm_service and not self._llm_service.use_fallback:
+            missing_root_inputs = self._llm_service.derive_required_inputs(context, state["gathered_data"])
 
         if missing_root_inputs:
             # Stay in data gathering loop
@@ -419,7 +428,7 @@ class ZeroTrustOrchestrator:
             # Dynamic Question Generation
             if self._llm_service and not self._llm_service.use_fallback:
                 state["output_message"] = self._llm_service.generate_followup(
-                    missing_root_inputs, state["gathered_data"], context_window=optimized_context
+                    missing_root_inputs, state["gathered_data"], context_window=combined_context
                 )
             else:
                 state["output_message"] = _build_doctor_followup(
@@ -434,14 +443,14 @@ class ZeroTrustOrchestrator:
                 "action_dispatch": "EXECUTION",
             }
             current_mode = mode_map.get(state["current_node"], None)
-
-            # Context Retrieval via Hybrid RAG
-            context, selected_chunks, rejected = await self._rag_engine.retrieve_context(
-                config_id, user_query, operational_mode=current_mode,
-            )
-            state["retrieved_context"] = context
             
-            combined_context = f"{optimized_context}\n\n--- CLINICAL GUIDELINES ---\n{context}" if context else optimized_context
+            # Re-fetch context for execution mode if needed
+            if current_mode != "LEARN":
+                context, selected_chunks, rejected = await self._rag_engine.retrieve_context(
+                    config_id, user_query, operational_mode=current_mode,
+                )
+                state["retrieved_context"] = context
+                combined_context = f"{optimized_context}\n\n--- CLINICAL GUIDELINES ---\n{context}" if context else optimized_context
             
             # PHASE 2: PROCESSING NODE
             state["current_node"] = "processing"
@@ -492,36 +501,50 @@ class ZeroTrustOrchestrator:
                 state["current_node"] = "action_dispatch"
                 evaluate_phase_steps("action_dispatch", eval_context=combined_context)
 
-                # Build a doctor-like assessment summary
+                # Build a dynamic doctor-like assessment summary using LLM
                 gathered = state["gathered_data"]
-                summary_parts = ["Thank you for providing all that information. Here's my initial assessment:\n"]
-
-                # Vitals summary
-                if "temperature" in gathered or "blood_pressure_systolic" in gathered:
-                    summary_parts.append("**Vitals Review:**")
-                    if "temperature" in gathered:
-                        temp = gathered["temperature"]
-                        if temp >= 100.4:
-                            summary_parts.append(f"  • Temperature: {temp}°F (elevated — will monitor)")
-                        else:
-                            summary_parts.append(f"  • Temperature: {temp}°F (normal)")
-                    if "blood_pressure_systolic" in gathered:
-                        sys = gathered.get("blood_pressure_systolic", 0)
-                        dia = gathered.get("blood_pressure_diastolic", "N/A")
-                        if sys >= 140:
-                            summary_parts.append(f"  • Blood Pressure: {sys}/{dia} mmHg (elevated — recommend follow-up)")
-                        else:
-                            summary_parts.append(f"  • Blood Pressure: {sys}/{dia} mmHg (within acceptable range)")
-
-                # Guideline-based recommendation from RAG
-                if selected_chunks:
-                    summary_parts.append(f"\n**Clinical Guidance:**")
-                    summary_parts.append(f"  {selected_chunks[0]['content']}")
-
-                summary_parts.append("\nI'll share these findings with the doctor ahead of your visit. "
-                                     "Do you have any other concerns you'd like to discuss?")
-
-                state["output_message"] = "\n".join(summary_parts)
+                
+                if self._llm_service and not self._llm_service.use_fallback:
+                    assessment_data = self._llm_service.generate_assessment(
+                        gathered=gathered,
+                        context_window=combined_context,
+                        history=state.get("history", [])
+                    )
+                    state["output_message"] = assessment_data.get("assessment_text", "Based on your information, I will compile this for the doctor's review.")
+                    
+                    triggered_skill = assessment_data.get("triggered_skill")
+                    if triggered_skill and triggered_skill != "null":
+                        try:
+                            # Import the orchestrator and execute the skill
+                            from app.skills.functional.orchestrator import FunctionalOrchestrator
+                            payload = assessment_data.get("skill_payload", {})
+                            payload["patient_id"] = str(session_id) # Using session_id as proxy for patient_id if needed
+                            
+                            skill_result = None
+                            if triggered_skill == "SKL_EXPERT_SYNTHESIS":
+                                skill_result = FunctionalOrchestrator.execute_expert_synthesis(payload)
+                            elif triggered_skill == "SKL_BASELINE_VIGILANCE":
+                                skill_result = FunctionalOrchestrator.execute_baseline_vigilance(payload)
+                            elif triggered_skill == "SKL_PRE_OP_GATEKEEPER":
+                                skill_result = FunctionalOrchestrator.execute_pre_op_gatekeeper(payload)
+                            else:
+                                skill_result = f"Skill {triggered_skill} not explicitly mapped in action_dispatch."
+                                
+                            state["output_message"] += f"\n\n**Action Taken:** Executed {triggered_skill}\n**Result:** {skill_result}"
+                        except Exception as e:
+                            logger.error(f"Failed to execute triggered skill {triggered_skill}: {e}")
+                            state["output_message"] += f"\n\n[Attempted to execute {triggered_skill} but encountered an error.]"
+                else:
+                    summary_parts = ["Thank you for providing all that information. Here's my initial assessment:\n"]
+                    if "temperature" in gathered or "blood_pressure_systolic" in gathered:
+                        summary_parts.append("**Vitals Review:**")
+                        # ... fallback logic ...
+                    if selected_chunks:
+                        summary_parts.append(f"\n**Clinical Guidance:**")
+                        summary_parts.append(f"  {selected_chunks[0]['content']}")
+                    summary_parts.append("\nI'll share these findings with the doctor ahead of your visit. "
+                                         "Do you have any other concerns you'd like to discuss?")
+                    state["output_message"] = "\n".join(summary_parts)
 
         # 7. Write telemetry trace
         chunk_ids = [UUID(c["chunk_id"]) for c in selected_chunks]

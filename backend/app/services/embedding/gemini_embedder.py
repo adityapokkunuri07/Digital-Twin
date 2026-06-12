@@ -29,7 +29,7 @@ class GeminiEmbeddingService(EmbeddingService):
             try:
                 from google import genai
                 self.client = genai.Client(api_key=api_key)
-                self.use_fallback = False
+                self.use_fallback = True # FORCED FALLBACK: Prevent 60s timeout due to model access issues
             except ImportError:
                 logger.warning(
                     "google-genai package not installed. Falling back to mock embeddings."

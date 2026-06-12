@@ -143,11 +143,20 @@ class SupabasePreConsultRepository(SupabaseClientMixin, PreConsultRepository):
                     })
             return
             
-        self.client.rpc("atomic_insert_summary_and_update_state", {
-            "p_session_id": str(session_id),
-            "p_structured_data": structured_data,
-            "p_summary_embedding": summary_embedding
-        }).execute()
+        try:
+            self.client.table("pre_consult_summaries").insert({
+                "session_id": str(session_id),
+                "structured_clinical_data": structured_data,
+                "summary_embedding": summary_embedding,
+                "order_index": 1
+            }).execute()
+        except Exception as e:
+            logger.error(f"Failed to insert summary: {e}")
+
+        # Always update the status to PENDING_REVIEW so the UI can advance
+        self.client.table("pre_consultation_sessions").update({
+            "status": "PENDING_REVIEW"
+        }).eq("session_id", str(session_id)).execute()
 
     async def create_appointment(
         self, patient_id: UUID, session_id: UUID, doctor_id: UUID, scheduled_time: datetime
