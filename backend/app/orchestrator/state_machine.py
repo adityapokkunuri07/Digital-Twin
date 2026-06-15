@@ -163,12 +163,15 @@ class ZeroTrustOrchestrator:
         strategy_id = current_task.get("strategy_identifier")
         escalations = []
         
-        if strategy_id:
+        if strategy_id and strategy_id != "GENERAL_INTAKE":
             try:
                 strategy = StrategyRegistry.resolve(strategy_id)
                 # Dispatch execution dynamically
                 processed_data, strat_escalations = await strategy.process(
-                    state["extracted_telemetry"], thresholds, context
+                    state["extracted_telemetry"], 
+                    thresholds, 
+                    context,
+                    llm_service=self._llm_service
                 )
                 state["extracted_telemetry"].update(processed_data)
                 escalations.extend(strat_escalations)

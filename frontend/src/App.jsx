@@ -10,6 +10,7 @@ import {
 import PreConsultation from './PreConsultation';
 import DoctorEscalationQueue from './DoctorEscalationQueue';
 import DoctorAppointments from './DoctorAppointments';
+import WorkflowBuilder from './WorkflowBuilder';
 
 const API_BASE = "http://localhost:8000/api";
 const DOCTOR_ID = "4a8f39b6-89d1-4db8-bbbe-d9616e00b8e2";
@@ -571,6 +572,7 @@ export default function App() {
   ]));
   const [autopilot, setAutopilot] = useState(() => loadState('autopilot', true));
   const [newStep, setNewStep] = useState({ name: '', inputs: '', outputs: '', dependencies: '', node_type: 'processing' });
+  const [showWorkflowBuilder, setShowWorkflowBuilder] = useState(false);
 
   const [chatInput, setChatInput] = useState('');
 
@@ -1403,6 +1405,19 @@ ${file.content || ''}
         {/* WORKFLOW BUILDER TAB */}
         {activeTab === 'workflow' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            
+            {showWorkflowBuilder ? (
+               <WorkflowBuilder 
+                 configId={configId} 
+                 onGenerateComplete={(workflowId) => {
+                   setShowWorkflowBuilder(false);
+                   loadConfigFromDB(configId); // Optional reload or manual fetch
+                   alert("Workflow generated and saved successfully!");
+                 }} 
+                 onCancel={() => setShowWorkflowBuilder(false)} 
+               />
+            ) : (
+              <>
             {/* Feasibility State Banner */}
             <div className="glass-card" style={{
               borderColor: isFeasible ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)',
@@ -1526,6 +1541,13 @@ ${file.content || ''}
                   <button className="btn btn-secondary" onClick={handleNewWorkflow}>
                     <RefreshCw size={14} style={{ marginRight: '6px' }} /> Initialize New Workflow
                   </button>
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={() => setShowWorkflowBuilder(true)}
+                    style={{ background: 'var(--primary)', color: 'white', marginTop: '10px' }}
+                  >
+                    <Sparkles size={14} style={{ marginRight: '6px' }} /> Add New Workflow
+                  </button>
                 </div>
 
                 {/* Add step Panel */}
@@ -1590,6 +1612,8 @@ ${file.content || ''}
                 </div>
               </div>
             </div>
+            </>
+            )}
           </div>
         )}
 

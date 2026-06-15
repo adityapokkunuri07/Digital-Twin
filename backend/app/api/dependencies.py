@@ -256,6 +256,9 @@ def get_cot_repo() -> CotRepository:
 def get_session_repo() -> SessionRepository:
     return provider.session_repo
 
+def get_preconsult_repo() -> PreConsultRepository:
+    return provider.preconsult_repo
+
 
 def get_embedding_service() -> EmbeddingService:
     return provider.embedding_service

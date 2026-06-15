@@ -64,6 +64,157 @@ def apply_ai_structure(raw_text: str, client: genai.Client) -> str:
         return raw_text
 
 
+@router.get("/sync")
+async def sync_obsidian(
+    config_repo = Depends(get_config_repo),
+    cot_repo = Depends(get_cot_repo),
+    knowledge_repo = Depends(get_knowledge_repo),
+    export_svc = Depends(get_export_service),
+):
+    """
+    Synchronizes the database state to the local Obsidian vault files on disk
+    and returns a complete list of all mapped files in the format expected by the frontend.
+    """
+    use_mock = config_repo.use_mock
+
+    # 1. Fetch configs, CoT nodes/edges, and knowledge chunks
+    if use_mock:
+        configs_list = list(config_repo._configs.values())
+
+        # Flatten all values from dict-of-lists
+        all_nodes = []
+        for n_list in cot_repo._cot_nodes.values():
+            all_nodes.extend(n_list)
+
+        all_edges = []
+        for e_list in cot_repo._cot_edges.values():
+            all_edges.extend(e_list)
+
+        all_chunks = []
+        for c_list in knowledge_repo._knowledge_chunks.values():
+            all_chunks.extend(c_list)
+    else:
+        client = config_repo.client
+        configs_list = client.table("expert_twin_configs").select("*").execute().data or []
+        all_nodes = client.table("cot_nodes").select("*").execute().data or []
+        all_edges = client.table("cot_edges").select("*").execute().data or []
+        all_chunks = client.table("knowledge_chunks").select("*").execute().data or []
+
+    # 2. Write to local Obsidian vault on disk
+    vault_path = export_svc.vault_path
+    os.makedirs(os.path.join(vault_path, "configs"), exist_ok=True)
+    os.makedirs(os.path.join(vault_path, "cot_nodes"), exist_ok=True)
+    os.makedirs(os.path.join(vault_path, "knowledge"), exist_ok=True)
+
+    # For each config, export it along with its nodes and edges
+    for config in configs_list:
+        config_id_str = str(config.get("config_id"))
+        config_nodes = [n for n in all_nodes if str(n.get("config_id")) == config_id_str]
+        config_edges = [e for e in all_edges if str(e.get("config_id")) == config_id_str]
+        try:
+            export_svc.export_config(config, config_nodes, config_edges)
+        except Exception as e:
+            pass
+
+    # For each knowledge chunk, write to disk under knowledge/
+    for chunk in all_chunks:
+        chunk_id = str(chunk.get("chunk_id"))
+        parent_path = chunk.get("parent_path", "")
+        title = chunk.get("title", "")
+        content = chunk.get("content", "")
+        tags = chunk.get("tags", [])
+        synthetic_questions = chunk.get("synthetic_questions", [])
+        first_q = synthetic_questions[0] if synthetic_questions else ""
+
+        filename_part = parent_path if parent_path else title.lower().replace(" ", "_")
+        # Ensure filename is safe
+        filename_part = "".join([c for c in filename_part if c.isalnum() or c in ".-_"])
+        chunk_filepath = os.path.join(vault_path, "knowledge", f"{filename_part}.md")
+
+        # Build YAML frontmatter markdown
+        yaml_frontmatter = (
+            "---\n"
+            f'node_id: "{chunk_id}"\n'
+            f'parent_id: "{parent_path or "root"}"\n'
+            'sync_status: "verified"\n'
+            "chain_of_thought: |\n"
+            f'  "{first_q}"\n'
+            f'tags: [{", ".join(tags)}]\n'
+            "quarantine_status: false\n"
+            "---\n\n"
+            f"# {title}\n"
+            f"{content}\n"
+        )
+
+        try:
+            with open(chunk_filepath, "w", encoding="utf-8") as f:
+                f.write(yaml_frontmatter)
+        except Exception as e:
+            pass
+
+    # 3. Compile the response list of files for the frontend
+    files_response = []
+
+    # Format configs
+    for config in configs_list:
+        config_id = str(config.get("config_id"))
+        active_version = config.get("active_version", "1.0.0")
+        workflow_config = config.get("workflow_config", {}) or {}
+        steps = workflow_config.get("steps", [])
+        files_response.append({
+            "path": f"configs/config_{config_id}.md",
+            "type": "config",
+            "node_id": config_id,
+            "title": f"Workflow Config {active_version}",
+            "content": f"Configuration for Dr. Sterling.\\nNodes: {len(steps)}",
+            "tags": ["config", "workflow"]
+        })
+
+    # Format CoT nodes
+    for node in all_nodes:
+        node_id = str(node.get("node_id"))
+        meta = node.get("metadata", {}) or {}
+        files_response.append({
+            "path": f"cot_nodes/node_{node_id}.md",
+            "type": "cot",
+            "node_id": node_id,
+            "parent_id": "",
+            "title": node.get("title", ""),
+            "content": node.get("content", ""),
+            "tags": ["onboarding"],
+            "chain_of_thought": "",
+            "quarantine_status": meta.get("unlearned", False),
+            "unlearning_rationale": meta.get("unlearning_reason", "")
+        })
+
+    # Format Knowledge chunks
+    for chunk in all_chunks:
+        chunk_id = str(chunk.get("chunk_id"))
+        parent_path = chunk.get("parent_path", "")
+        title = chunk.get("title", "")
+        tags = chunk.get("tags", [])
+        synthetic_questions = chunk.get("synthetic_questions", [])
+        first_q = synthetic_questions[0] if synthetic_questions else ""
+
+        filename_part = parent_path if parent_path else title.lower().replace(" ", "_")
+        filename_part = "".join([c for c in filename_part if c.isalnum() or c in ".-_"])
+
+        files_response.append({
+            "path": f"knowledge/{filename_part}.md",
+            "type": "knowledge",
+            "node_id": chunk_id,
+            "parent_id": parent_path,
+            "title": title,
+            "content": chunk.get("content", ""),
+            "tags": tags,
+            "chain_of_thought": first_q,
+            "quarantine_status": False,
+            "unlearning_rationale": ""
+        })
+
+    return {"status": "success", "files": files_response}
+
+
 @router.get("/{config_id}")
 async def get_config(
     config_id: UUID,
@@ -207,152 +358,3 @@ async def unlearn_nodes(
     return result
 
 
-@router.get("/sync")
-async def sync_obsidian(
-    config_repo = Depends(get_config_repo),
-    cot_repo = Depends(get_cot_repo),
-    knowledge_repo = Depends(get_knowledge_repo),
-    export_svc = Depends(get_export_service),
-):
-    """
-    Synchronizes the database state to the local Obsidian vault files on disk
-    and returns a complete list of all mapped files in the format expected by the frontend.
-    """
-    use_mock = config_repo.use_mock
-
-    # 1. Fetch configs, CoT nodes/edges, and knowledge chunks
-    if use_mock:
-        configs_list = list(config_repo._configs.values())
-
-        # Flatten all values from dict-of-lists
-        all_nodes = []
-        for n_list in cot_repo._cot_nodes.values():
-            all_nodes.extend(n_list)
-
-        all_edges = []
-        for e_list in cot_repo._cot_edges.values():
-            all_edges.extend(e_list)
-
-        all_chunks = []
-        for c_list in knowledge_repo._knowledge_chunks.values():
-            all_chunks.extend(c_list)
-    else:
-        client = config_repo.client
-        configs_list = client.table("expert_twin_configs").select("*").execute().data or []
-        all_nodes = client.table("cot_nodes").select("*").execute().data or []
-        all_edges = client.table("cot_edges").select("*").execute().data or []
-        all_chunks = client.table("knowledge_chunks").select("*").execute().data or []
-
-    # 2. Write to local Obsidian vault on disk
-    vault_path = export_svc.vault_path
-    os.makedirs(os.path.join(vault_path, "configs"), exist_ok=True)
-    os.makedirs(os.path.join(vault_path, "cot_nodes"), exist_ok=True)
-    os.makedirs(os.path.join(vault_path, "knowledge"), exist_ok=True)
-
-    # For each config, export it along with its nodes and edges
-    for config in configs_list:
-        config_id_str = str(config.get("config_id"))
-        config_nodes = [n for n in all_nodes if str(n.get("config_id")) == config_id_str]
-        config_edges = [e for e in all_edges if str(e.get("config_id")) == config_id_str]
-        try:
-            export_svc.export_config(config, config_nodes, config_edges)
-        except Exception as e:
-            pass
-
-    # For each knowledge chunk, write to disk under knowledge/
-    for chunk in all_chunks:
-        chunk_id = str(chunk.get("chunk_id"))
-        parent_path = chunk.get("parent_path", "")
-        title = chunk.get("title", "")
-        content = chunk.get("content", "")
-        tags = chunk.get("tags", [])
-        synthetic_questions = chunk.get("synthetic_questions", [])
-        first_q = synthetic_questions[0] if synthetic_questions else ""
-
-        filename_part = parent_path if parent_path else title.lower().replace(" ", "_")
-        # Ensure filename is safe
-        filename_part = "".join([c for c in filename_part if c.isalnum() or c in ".-_"])
-        chunk_filepath = os.path.join(vault_path, "knowledge", f"{filename_part}.md")
-
-        # Build YAML frontmatter markdown
-        yaml_frontmatter = (
-            "---\n"
-            f'node_id: "{chunk_id}"\n'
-            f'parent_id: "{parent_path or "root"}"\n'
-            'sync_status: "verified"\n'
-            "chain_of_thought: |\n"
-            f'  "{first_q}"\n'
-            f'tags: [{", ".join(tags)}]\n'
-            "quarantine_status: false\n"
-            "---\n\n"
-            f"# {title}\n"
-            f"{content}\n"
-        )
-
-        try:
-            with open(chunk_filepath, "w", encoding="utf-8") as f:
-                f.write(yaml_frontmatter)
-        except Exception as e:
-            pass
-
-    # 3. Compile the response list of files for the frontend
-    files_response = []
-
-    # Format configs
-    for config in configs_list:
-        config_id = str(config.get("config_id"))
-        active_version = config.get("active_version", "1.0.0")
-        workflow_config = config.get("workflow_config", {}) or {}
-        steps = workflow_config.get("steps", [])
-        files_response.append({
-            "path": f"configs/config_{config_id}.md",
-            "type": "config",
-            "node_id": config_id,
-            "title": f"Workflow Config {active_version}",
-            "content": f"Configuration for Dr. Sterling.\nNodes: {len(steps)}",
-            "tags": ["config", "workflow"]
-        })
-
-    # Format CoT nodes
-    for node in all_nodes:
-        node_id = str(node.get("node_id"))
-        meta = node.get("metadata", {}) or {}
-        files_response.append({
-            "path": f"cot_nodes/node_{node_id}.md",
-            "type": "cot",
-            "node_id": node_id,
-            "parent_id": "",
-            "title": node.get("title", ""),
-            "content": node.get("content", ""),
-            "tags": ["onboarding"],
-            "chain_of_thought": "",
-            "quarantine_status": meta.get("unlearned", False),
-            "unlearning_rationale": meta.get("unlearning_reason", "")
-        })
-
-    # Format Knowledge chunks
-    for chunk in all_chunks:
-        chunk_id = str(chunk.get("chunk_id"))
-        parent_path = chunk.get("parent_path", "")
-        title = chunk.get("title", "")
-        tags = chunk.get("tags", [])
-        synthetic_questions = chunk.get("synthetic_questions", [])
-        first_q = synthetic_questions[0] if synthetic_questions else ""
-
-        filename_part = parent_path if parent_path else title.lower().replace(" ", "_")
-        filename_part = "".join([c for c in filename_part if c.isalnum() or c in ".-_"])
-
-        files_response.append({
-            "path": f"knowledge/{filename_part}.md",
-            "type": "knowledge",
-            "node_id": chunk_id,
-            "parent_id": parent_path,
-            "title": title,
-            "content": chunk.get("content", ""),
-            "tags": tags,
-            "chain_of_thought": first_q,
-            "quarantine_status": False,
-            "unlearning_rationale": ""
-        })
-
-    return {"status": "success", "files": files_response}

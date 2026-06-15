@@ -18,7 +18,8 @@ class ProcessingStrategy(ABC):
         self, 
         patient_data: Dict[str, Any], 
         thresholds: List[Dict[str, Any]], 
-        context: str
+        context: str,
+        **kwargs
     ) -> Tuple[Dict[str, Any], List[str]]:
         """
         Process the patient data against established clinical thresholds.

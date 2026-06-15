@@ -16,6 +16,7 @@ from backend.app.api.routes.config_routes import router as config_router
 from backend.app.api.routes.session_routes import router as session_router
 from backend.app.api.routes.preconsult_routes import router as preconsult_router
 from backend.app.api.routes.auth_routes import router as auth_router
+from backend.app.api.routes.workflow_routes import router as workflow_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -39,6 +40,7 @@ app.include_router(config_router, prefix=settings.API_V1_STR)
 app.include_router(session_router, prefix=settings.API_V1_STR)
 app.include_router(preconsult_router, prefix=settings.API_V1_STR)
 app.include_router(auth_router, prefix=settings.API_V1_STR)
+app.include_router(workflow_router, prefix=settings.API_V1_STR)
 
 
 @app.on_event("startup")
