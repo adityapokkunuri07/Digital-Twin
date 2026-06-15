@@ -50,6 +50,7 @@ from backend.app.orchestrator.safety_rules.base import SafetyRule
 from backend.app.orchestrator.safety_rules.fever_rule import FeverSafetyRule
 from backend.app.orchestrator.safety_rules.cardiac_rule import CardiacSafetyRule
 from backend.app.orchestrator.safety_rules.confidence_rule import ConfidenceSafetyRule
+from backend.app.orchestrator.safety_rules.threshold_safety_rule import ThresholdSafetyRule
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,7 @@ class ServiceProvider:
             FeverSafetyRule(),
             CardiacSafetyRule(),
             ConfidenceSafetyRule(confidence_gate=0.85),
+            ThresholdSafetyRule(),
         ]
 
         # 5. Business services (composed from repositories + infra)

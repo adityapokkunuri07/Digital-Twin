@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # Gemini API Key
     GEMINI_API_KEY: str = ""
     
+    # OpenAI API Key for Native 1536 Embeddings
+    OPENAI_API_KEY: str = ""
+    
     # Path to the Obsidian Vault (Leave empty to use default ./obsidian_vault)
     OBSIDIAN_VAULT_PATH: str = ""
 

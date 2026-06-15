@@ -67,6 +67,24 @@ async def submit_doctor_review(
     return response
 
 
+@router.post("/session/{session_id}/align-release")
+async def align_and_release_session(
+    session_id: UUID,
+    service: PreConsultationService = Depends(get_preconsult_service),
+):
+    """Doctor dashboard action: Unfreeze session and advance workflow."""
+    return await service.align_and_release(session_id)
+
+
+@router.get("/session/{session_id}/escalation-context")
+async def get_escalation_context(
+    session_id: UUID,
+    service: PreConsultationService = Depends(get_preconsult_service),
+):
+    """Provide side-by-side comparison of patient data vs thresholds for the doctor."""
+    return await service.get_escalation_context(session_id)
+
+
 @router.post("/book")
 async def book_appointment(
     payload: BookAppointmentRequest,

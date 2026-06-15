@@ -17,7 +17,7 @@ class SafetyRule(ABC):
 
     @abstractmethod
     def evaluate(
-        self, gathered_data: Dict[str, Any], classification_score: float
+        self, gathered_data: Dict[str, Any], classification_score: float, thresholds: list = None
     ) -> Tuple[bool, str]:
         """
         Evaluate whether an anomaly condition is triggered.

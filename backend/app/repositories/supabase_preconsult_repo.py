@@ -26,15 +26,22 @@ class SupabasePreConsultRepository(SupabaseClientMixin, PreConsultRepository):
             self._summaries: List[Dict[str, Any]] = []
             self._appointments: List[Dict[str, Any]] = []
 
-    async def create_session(self, patient_id: UUID, config_id: UUID) -> Dict[str, Any]:
+    async def create_session(
+        self, patient_id: UUID, config_id: UUID, workflow_id: UUID, configuration_snapshot: Dict[str, Any]
+    ) -> Dict[str, Any]:
         record = {
             "patient_id": str(patient_id),
             "config_id": str(config_id),
             "status": "GATHERING",
             "current_confidence_score": 0.0,
             "turn_count": 0,
-            "current_extracted_entities": {}
+            "current_extracted_entities": {},
+            "assigned_actor": "TWIN",
+            "extracted_telemetry": {},
+            "configuration_snapshot": configuration_snapshot
         }
+        if workflow_id:
+            record["workflow_id"] = str(workflow_id)
         
         if self.use_mock:
             session_id = str(UUID(int=1)) # Mock UUID

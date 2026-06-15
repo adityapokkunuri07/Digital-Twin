@@ -8,6 +8,7 @@ export default function DoctorEscalationQueue() {
   const [loading, setLoading] = useState(true);
   const [selectedSession, setSelectedSession] = useState(null);
   const [sessionDetails, setSessionDetails] = useState(null);
+  const [escalationContext, setEscalationContext] = useState(null);
   const [doctorNotes, setDoctorNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -35,16 +36,22 @@ export default function DoctorEscalationQueue() {
   const selectSession = async (session) => {
     setSelectedSession(session);
     setSessionDetails(null);
+    setEscalationContext(null);
     setDoctorNotes('');
     
     try {
-      const res = await fetch(`${API_BASE}/pre-consult/session/${session.session_id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSessionDetails(data);
+      const [resDetails, resContext] = await Promise.all([
+        fetch(`${API_BASE}/pre-consult/session/${session.session_id}`),
+        fetch(`${API_BASE}/pre-consult/session/${session.session_id}/escalation-context`)
+      ]);
+      if (resDetails.ok) {
+        setSessionDetails(await resDetails.json());
+      }
+      if (resContext.ok) {
+        setEscalationContext(await resContext.json());
       }
     } catch (err) {
-      console.error("Failed to fetch session details", err);
+      console.error("Failed to fetch session details or context", err);
     }
   };
 
@@ -53,24 +60,22 @@ export default function DoctorEscalationQueue() {
     setSubmitting(true);
     
     try {
-      const res = await fetch(`${API_BASE}/pre-consult/review`, {
+      const res = await fetch(`${API_BASE}/pre-consult/session/${selectedSession.session_id}/align-release`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: selectedSession.session_id,
-          doctor_review_notes: doctorNotes
-        })
+        headers: { 'Content-Type': 'application/json' }
       });
       
       if (res.ok) {
         // Success: Remove from queue and clear selection
         setQueue(prev => prev.filter(s => s.session_id !== selectedSession.session_id));
         setSelectedSession(null);
-        alert("Patient released for booking successfully.");
+        alert("Session aligned and released successfully. Workflow advanced.");
+      } else {
+        alert("Failed to align and release session.");
       }
     } catch (err) {
-      console.error("Review failed", err);
-      alert("Failed to submit review");
+      console.error("Align & Release failed", err);
+      alert("Failed to align and release");
     } finally {
       setSubmitting(false);
     }
@@ -138,19 +143,31 @@ export default function DoctorEscalationQueue() {
            <div className="animate-spin-fast" style={{ padding: '40px', textAlign: 'center', flex: 1 }}><Activity size={24} style={{ color: 'var(--primary)' }} /></div>
         ) : (
           <>
-            <div style={{ background: '#1E1E1E', padding: '16px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)', boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.5)', overflowY: 'auto', maxHeight: '200px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '16px' }}>
-                <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#FF5F56' }}/>
-                <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#FFBD2E' }}/>
-                <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#27C93F' }}/>
-                <span style={{ marginLeft: '10px', fontSize: '12px', color: 'var(--text-muted)', fontFamily: '"SF Mono", "Menlo", monospace' }}>structured_data.json</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div style={{ background: '#1E1E1E', padding: '16px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)', boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.5)', overflowY: 'auto', maxHeight: '200px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '16px' }}>
+                  <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#FF5F56' }}/>
+                  <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#FFBD2E' }}/>
+                  <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#27C93F' }}/>
+                  <span style={{ marginLeft: '10px', fontSize: '12px', color: 'var(--text-muted)', fontFamily: '"SF Mono", "Menlo", monospace' }}>patient_data.json</span>
+                </div>
+                <pre style={{ margin: 0, fontSize: '13px', color: '#5AC8FA', whiteSpace: 'pre-wrap', fontFamily: '"SF Mono", "Menlo", monospace', lineHeight: 1.5 }}>
+                  {JSON.stringify(escalationContext?.patient_data || sessionDetails.summary?.structured_clinical_data || {}, null, 2)}
+                </pre>
               </div>
-              <pre style={{ margin: 0, fontSize: '13px', color: '#5AC8FA', whiteSpace: 'pre-wrap', fontFamily: '"SF Mono", "Menlo", monospace', lineHeight: 1.5 }}>
-                {JSON.stringify(sessionDetails.summary?.structured_clinical_data || {}, null, 2)}
-              </pre>
+
+              <div style={{ background: '#1E1E1E', padding: '16px', borderRadius: '16px', border: '1px solid rgba(255, 69, 58, 0.2)', boxShadow: 'inset 0 2px 10px rgba(255,0,0,0.1)', overflowY: 'auto', maxHeight: '200px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '16px' }}>
+                  <ShieldCheck size={14} style={{ color: 'var(--error)' }} />
+                  <span style={{ fontSize: '12px', color: 'var(--error)', fontFamily: '"SF Mono", "Menlo", monospace' }}>threshold_rules.json</span>
+                </div>
+                <pre style={{ margin: 0, fontSize: '13px', color: '#FF9F0A', whiteSpace: 'pre-wrap', fontFamily: '"SF Mono", "Menlo", monospace', lineHeight: 1.5 }}>
+                  {JSON.stringify(escalationContext?.thresholds || [], null, 2)}
+                </pre>
+              </div>
             </div>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', maxHeight: '250px', padding: '12px', background: 'rgba(0,0,0,0.2)', borderRadius: '16px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', maxHeight: '200px', padding: '12px', background: 'rgba(0,0,0,0.2)', borderRadius: '16px' }}>
               <h5 style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Interaction History</h5>
               {sessionDetails.logs && sessionDetails.logs.length > 0 ? sessionDetails.logs.map((log, i) => (
                 <div key={i} style={{ padding: '10px', borderRadius: '12px', background: log.sender === 'PATIENT' ? 'rgba(10, 132, 255, 0.1)' : 'rgba(255,255,255,0.05)', borderLeft: log.sender === 'PATIENT' ? '3px solid var(--primary)' : '3px solid var(--secondary)' }}>

@@ -10,7 +10,7 @@ from datetime import datetime
 from google import genai
 
 from backend.app.core.config import settings
-from backend.app.core.interfaces.repositories import PreConsultRepository
+from backend.app.core.interfaces.repositories import PreConsultRepository, WorkflowRepository, ThresholdRepository
 from backend.app.orchestrator.safety_rules.base import SafetyRule
 
 logger = logging.getLogger(__name__)
@@ -30,9 +30,13 @@ class PreConsultationService:
         self, 
         preconsult_repo: PreConsultRepository, 
         safety_rules: List[SafetyRule], 
-        langgraph_orchestrator: Any # Injected ZeroTrustOrchestrator
+        langgraph_orchestrator: Any, # Injected ZeroTrustOrchestrator
+        workflow_repo: WorkflowRepository = None,
+        threshold_repo: ThresholdRepository = None
     ):
         self._repo = preconsult_repo
+        self._workflow_repo = workflow_repo
+        self._threshold_repo = threshold_repo
         self._safety_rules = safety_rules or []
         self._orchestrator = langgraph_orchestrator
         
@@ -44,8 +48,46 @@ class PreConsultationService:
             logger.warning("GEMINI_API_KEY is not set. PreConsultationService LLM integration will fail.")
 
     async def start_session(self, patient_id: UUID, config_id: UUID) -> Dict[str, Any]:
-        """Task 1 Init: Create a new session."""
-        session = await self._repo.create_session(patient_id, config_id)
+        """Task 1 Init: Create a new session with hydrated configuration snapshot."""
+        # 1. Hydrate the workflow configuration
+        wf_res = self._repo.client.table("doctor_workflows").select("id").eq("config_id", str(config_id)).execute()
+        
+        if not wf_res.data:
+            # Fallback if the user hasn't seeded the database
+            logger.warning(f"No doctor_workflow found for config {config_id}. Using mock configuration.")
+            workflow_id = None
+            tasks = [{
+                "step_number": 1,
+                "task_name": "Assess Chest Pain",
+                "node_alignment": "data_gathering",
+                "strategy_identifier": "SYMPTOM_PARSER",
+                "task_config": {"required_variables": ["chest_pain_severity", "fever"]}
+            }]
+            thresholds = [{
+                "entity_name": "fever",
+                "max_allowable_value": 103.0,
+                "critical_escalation_triggers": ["unbearable pain", "passing out"]
+            }]
+        else:
+            workflow_id_str = wf_res.data[0]["id"]
+            workflow_id = UUID(workflow_id_str)
+
+            # Fetch tasks
+            tasks_res = self._repo.client.table("workflow_tasks").select("*").eq("workflow_id", workflow_id_str).order("step_number").execute()
+            tasks = tasks_res.data if tasks_res.data else []
+
+            # Fetch thresholds
+            thresh_res = self._repo.client.table("journalist_entity_thresholds").select("*").eq("config_id", str(config_id)).execute()
+            thresholds = thresh_res.data if thresh_res.data else []
+
+        configuration_snapshot = {
+            "tasks": tasks,
+            "thresholds": thresholds
+        }
+
+        session = await self._repo.create_session(
+            patient_id, config_id, workflow_id, configuration_snapshot
+        )
         
         # Save the initial greeting
         await self._repo.append_interaction_log(
@@ -57,6 +99,53 @@ class PreConsultationService:
         )
         
         return session
+
+    async def align_and_release(self, session_id: UUID) -> Dict[str, Any]:
+        """
+        Unfreeze the session after doctor review and advance the workflow step.
+        """
+        session_record = await self._orchestrator._session_repo.get_active_session(session_id)
+        if not session_record:
+            raise ValueError(f"Session '{session_id}' not found.")
+
+        state = session_record["graph_state"]
+        
+        # Unfreeze
+        state["is_paused"] = False
+        state["requires_review"] = False
+        state["session_status"] = "IN_PROGRESS"
+        
+        # Advance step
+        state["current_step_index"] = state.get("current_step_index", 0) + 1
+        state["output_message"] = "The doctor has reviewed your information. We can now proceed."
+        
+        # Save state
+        await self._orchestrator._save_state(session_id, state)
+        
+        # Update pre-consult session status
+        await self._repo.update_session_state(
+            session_id, "GATHERING", state["classification_score"], False
+        )
+        
+        return state
+
+    async def get_escalation_context(self, session_id: UUID) -> Dict[str, Any]:
+        """
+        Provide side-by-side comparison of patient data vs thresholds for the doctor.
+        """
+        session_record = await self._orchestrator._session_repo.get_active_session(session_id)
+        if not session_record:
+            raise ValueError(f"Session '{session_id}' not found.")
+
+        state = session_record["graph_state"]
+        snapshot = state.get("configuration_snapshot", {})
+        
+        return {
+            "patient_data": state.get("extracted_telemetry", {}),
+            "thresholds": snapshot.get("thresholds", []),
+            "current_step": state.get("current_step_index", 0),
+            "tasks": snapshot.get("tasks", [])
+        }
 
     async def get_session_details(self, session_id: UUID) -> Dict[str, Any]:
         """Fetch the current session state and synthesis summary."""

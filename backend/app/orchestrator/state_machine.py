@@ -1,14 +1,13 @@
 """
-Zero-Trust Orchestrator — LangGraph 4-Node State Machine.
+Zero-Trust Orchestrator — LangGraph 4-Node State Machine (V2).
 
-Refactored to follow Open/Closed Principle:
-- Data extraction is delegated to injected List[DataExtractor]
-- Anomaly detection is delegated to injected List[SafetyRule]
-- Adding new extractors or safety rules requires ZERO changes to this file
+Refactored to implement the Zero-Trust Execution architecture from the Engineering Specification:
+- Node 1: Data Gathering (Hydration + Prompt Containment + Knowledge Saturation Gate)
+- Node 2: Data Processing (Dynamic Dispatch via StrategyRegistry)
+- Node 3: Human Intercept (Dynamic Threshold Rule Evaluation)
+- Node 4: Action Dispatch
 
-Depends on segregated repository interfaces (DIP):
-- ConfigRepository for workflow config loading
-- SessionRepository for state checkpointing and telemetry
+Relies on Immutable Configuration Snapshots inside the AgentState.
 """
 from typing import TypedDict, Dict, Any, List
 from uuid import UUID, uuid4
@@ -20,100 +19,10 @@ from backend.app.services.llm.gemini_llm import GeminiLLMService
 from backend.app.orchestrator.extractors.base import DataExtractor
 from backend.app.orchestrator.safety_rules.base import SafetyRule
 from backend.app.core.interfaces.embedding import EmbeddingService
+from backend.app.orchestrator.confidence_gate import KnowledgeSaturationGate
+from backend.app.orchestrator.strategies.registry import StrategyRegistry
 
 logger = logging.getLogger(__name__)
-
-# ─── Natural-language question mapping for clinical variables ───
-# Instead of dumping raw variable names, the doctor twin asks like a real physician.
-_VARIABLE_QUESTIONS = {
-    "temperature": "What is your current body temperature?",
-    "blood_pressure_systolic": "Could you share your blood pressure reading?",
-    "blood_pressure_diastolic": "Could you share your blood pressure reading?",
-    "chest_pain": "Are you experiencing any chest pain or discomfort?",
-    "chest_pain_duration": "How long have you been experiencing the chest pain?",
-    "chest_pain_location": "Where exactly do you feel the pain — is it in the center of your chest, the left side, or somewhere else?",
-    "shortness_of_breath": "Do you experience any shortness of breath, especially with physical activity?",
-    "palpitations": "Have you noticed any racing heartbeat or irregular heart rhythms?",
-    "smoking_history": "Have you ever smoked? If so, for how long and have you quit?",
-    "diabetes": "Have you been diagnosed with diabetes or high blood sugar?",
-    "family_cardiac_history": "Is there any history of heart disease in your immediate family — parents or siblings?",
-    "bmi": "Could you share your approximate height and weight so I can assess your BMI?",
-    "vision_changes": "Have you noticed any changes in your vision recently?",
-}
-
-# Group related variables so the doctor asks a few at a time, not all at once
-_QUESTION_GROUPS = [
-    {"label": "vitals", "vars": ["temperature", "blood_pressure_systolic", "blood_pressure_diastolic"]},
-    {"label": "primary_symptoms", "vars": ["chest_pain", "shortness_of_breath", "palpitations"]},
-    {"label": "symptom_details", "vars": ["chest_pain_duration", "chest_pain_location"]},
-    {"label": "risk_factors", "vars": ["smoking_history", "diabetes", "family_cardiac_history", "bmi"]},
-]
-
-
-def _build_doctor_followup(missing_inputs: list, gathered_data: dict) -> str:
-    """
-    Build a natural, empathetic follow-up message that a doctor would actually say.
-    Groups questions logically and acknowledges what the patient already shared.
-    """
-    missing_set = set(missing_inputs)
-
-    # Acknowledge what was already gathered
-    ack_parts = []
-    if "temperature" in gathered_data:
-        temp = gathered_data["temperature"]
-        if temp >= 103:
-            ack_parts.append(f"I see your temperature is {temp}°F — that's quite elevated and I want to make sure we look into that carefully.")
-        elif temp >= 100.4:
-            ack_parts.append(f"Thank you. Your temperature of {temp}°F shows a mild fever — I'll keep that in mind.")
-        else:
-            ack_parts.append(f"Good, your temperature of {temp}°F is within the normal range.")
-
-    if "blood_pressure_systolic" in gathered_data:
-        sys = gathered_data.get("blood_pressure_systolic", 0)
-        dia = gathered_data.get("blood_pressure_diastolic", 0)
-        if sys >= 180 or dia >= 120:
-            ack_parts.append(f"Your blood pressure reading of {sys}/{dia} is quite high — that's something we need to address.")
-        elif sys >= 140 or dia >= 90:
-            ack_parts.append(f"Your blood pressure of {sys}/{dia} is elevated. We should discuss management options.")
-        elif sys >= 130 or dia >= 80:
-            ack_parts.append(f"Your blood pressure of {sys}/{dia} is slightly above the ideal range.")
-        else:
-            ack_parts.append(f"Your blood pressure of {sys}/{dia} looks healthy.")
-
-    if gathered_data.get("chest_pain"):
-        ack_parts.append("I understand you're experiencing chest pain — I want to learn more about that.")
-
-    acknowledgment = " ".join(ack_parts)
-
-    # Find the first group with missing questions and ask those
-    questions = []
-    # Deduplicate (e.g., systolic and diastolic are one BP question)
-    asked_questions = set()
-    for group in _QUESTION_GROUPS:
-        group_missing = [v for v in group["vars"] if v in missing_set]
-        if group_missing:
-            for var in group_missing:
-                q = _VARIABLE_QUESTIONS.get(var, f"Could you tell me about your {var.replace('_', ' ')}?")
-                if q not in asked_questions:
-                    questions.append(q)
-                    asked_questions.add(q)
-            break  # Only ask one group at a time
-
-    # If no group matched, ask remaining individually
-    if not questions:
-        for var in missing_inputs:
-            q = _VARIABLE_QUESTIONS.get(var, f"Could you tell me about your {var.replace('_', ' ')}?")
-            if q not in asked_questions:
-                questions.append(q)
-                asked_questions.add(q)
-
-    # Compose the message
-    if acknowledgment and questions:
-        return f"{acknowledgment}\n\nTo continue your assessment, I'd like to ask:\n" + "\n".join(f"• {q}" for q in questions)
-    elif questions:
-        return "Thank you for sharing that. I have a few more questions:\n" + "\n".join(f"• {q}" for q in questions)
-    else:
-        return "Thank you. Let me review your information now."
 
 
 class AgentState(TypedDict):
@@ -121,9 +30,14 @@ class AgentState(TypedDict):
     session_id: str
     conversation_id: str
     config_id: str
+    workflow_id: str
+    current_step_index: int
+    assigned_actor: str
+    session_status: str
     current_node: str
     user_query: str
-    gathered_data: Dict[str, Any]
+    extracted_telemetry: Dict[str, Any]
+    configuration_snapshot: Dict[str, Any]
     retrieved_context: str
     output_message: str
     requires_review: bool
@@ -133,20 +47,6 @@ class AgentState(TypedDict):
 
 
 class ZeroTrustOrchestrator:
-    """
-    4-Node LangGraph execution engine with pluggable extractors and safety rules.
-
-    Nodes:
-        1. Data Gathering — Adaptive extraction loops via injected extractors
-        2. Data Processing — Cross-reference against SSOT via Hybrid RAG
-        3. Human Intercept — Circuit breaker triggered by injected safety rules
-        4. Action Dispatch — Deterministic function execution
-
-    Open/Closed: New extractors and safety rules are injected at construction time.
-    To add a new extraction pattern or safety check, create a new class implementing
-    DataExtractor or SafetyRule and register it in the ServiceProvider.
-    """
-
     def __init__(
         self,
         config_repo: ConfigRepository,
@@ -163,341 +63,175 @@ class ZeroTrustOrchestrator:
         self._extractors = extractors or []
         self._safety_rules = safety_rules or []
         self._embedding_service: EmbeddingService | None = None
-        self._preconsult_repo = None # Will be injected later if needed for db rpc
+        self._preconsult_repo = None
+        self._saturation_gate = KnowledgeSaturationGate()
         
     def set_preconsult_dependencies(self, preconsult_repo, embedding_service):
-        """Inject additional dependencies needed for pre-consultation synthesis."""
         self._preconsult_repo = preconsult_repo
         self._embedding_service = embedding_service
 
-    async def initialize_session(
-        self, conversation_id: UUID, config_id: UUID
-    ) -> Dict[str, Any]:
-        """Create a new execution session with a clean initial state."""
-        session_id = uuid4()
-
-        # Load doctor name from config to personalize the greeting
-        config_record = await self._config_repo.get_expert_config(config_id)
-        workflow_config = config_record.get("workflow_config", {}) if config_record else {}
-        doctor_name = workflow_config.get("doctor_name", "your doctor")
-        specialty = workflow_config.get("specialty", "")
-        specialty_intro = f" I specialize in {specialty}." if specialty else ""
-
-        greeting = (
-            f"Hello, I'm {doctor_name}'s digital assistant.{specialty_intro} "
-            f"I'll be gathering some initial information before your consultation. "
-            f"How are you feeling today? Please describe what's been bothering you."
-        )
-
-        initial_state: AgentState = {
-            "session_id": str(session_id),
-            "conversation_id": str(conversation_id),
-            "config_id": str(config_id),
-            "current_node": "start",
-            "user_query": "",
-            "gathered_data": {},
-            "retrieved_context": "",
-            "output_message": greeting,
-            "requires_review": False,
-            "is_paused": False,
-            "classification_score": 1.0,
-            "history": [],
-        }
-
-        await self._session_repo.save_active_session(
-            session_id, conversation_id, config_id,
-            initial_state["current_node"], initial_state,
-            initial_state["is_paused"], initial_state["requires_review"],
-        )
-        return initial_state
-
-    async def run_step(
-        self, session_id: UUID, user_query: str
-    ) -> Dict[str, Any]:
+    async def run_step(self, session_id: UUID, user_query: str) -> Dict[str, Any]:
         """
-        Execute a single transition step in the 4-node state machine.
-
-        Flow:
-        1. Load session checkpoint
-        2. Check concurrency lock (frozen sessions are rejected)
-        3. Node 1: Run all DataExtractors against user input
-        4. Check if all required inputs are gathered
-        5. Node 2: Data Processing via Hybrid RAG
-        6. Node 3: Run all SafetyRules — escalate if any trigger
-        7. Node 4: Action Dispatch — formulate response
-        8. Write telemetry trace
-        9. Save updated checkpoint
+        Execute a single transition step in the V2 4-node state machine.
         """
-        # 1. Load session checkpoint
+        # 1. Load session checkpoint (in V2, PreConsultService manages the primary DB state, 
+        # but this method still operates on the generic Graph state if called directly)
         session_record = await self._session_repo.get_active_session(session_id)
         if not session_record:
-            raise ValueError(f"Session with ID '{session_id}' not found.")
+            raise ValueError(f"Session '{session_id}' not found.")
 
         state: AgentState = session_record["graph_state"]
         state["user_query"] = user_query
 
-        # 2. Concurrency lock check
+        # Lock check
         if state.get("is_paused", False) or state.get("requires_review", False):
-            state["output_message"] = (
-                "This session has been suspended and is awaiting expert human review. "
-                "Operations are frozen."
-            )
+            state["output_message"] = "This session has been suspended and is awaiting expert human review."
             return state
 
-        config_id = UUID(state["config_id"])
-        config_record = await self._config_repo.get_expert_config(config_id)
-        workflow_config = config_record.get("workflow_config", {}) if config_record else {}
-        steps = workflow_config.get("steps", [])
-
-        # Identify root inputs (inputs not produced by any other step)
-        all_outputs = set(
-            out
-            for step in steps
-            for out in step.get("outputs", [])
-        )
+        # Read the immutable snapshot
+        snapshot = state.get("configuration_snapshot", {})
+        tasks = snapshot.get("tasks", [])
+        thresholds = snapshot.get("thresholds", [])
         
-        root_inputs = list(set(
-            inp
-            for step in steps
-            for inp in step.get("inputs", [])
-            if inp not in all_outputs
-        ))
+        current_step_index = state.get("current_step_index", 0)
+        if current_step_index >= len(tasks):
+            state["output_message"] = "Session completed."
+            return state
+            
+        current_task = tasks[current_step_index]
+        assigned_executor = current_task.get("assigned_executor", "TWIN")
+        
+        # Node Routing
+        if assigned_executor == "DOCTOR":
+            # Bypass AI Execution -> Route to Node 3 (Human Intercept)
+            state["current_node"] = "human_intercept"
+            state["requires_review"] = True
+            state["is_paused"] = True
+            state["session_status"] = "PENDING_REVIEW"
+            state["output_message"] = "This step requires the doctor's review. You have been placed in the review queue."
+            await self._save_state(session_id, state)
+            return state
 
-        # Calculate what was missing before this turn
-        missing_root_before = [
-            x for x in root_inputs
-            if x not in state["gathered_data"]
-        ]
-
-        # 3. Node 1: Data Gathering — run all injected extractors AND dynamic LLM
+        # ---- NODE 1: DATA GATHERING ----
+        state["current_node"] = "data_gathering"
+        
+        # Execute basic extractors
         text = user_query.lower()
         extracted_any = False
-        
-        # Fast fallback extractors
+        if "extracted_telemetry" not in state:
+            state["extracted_telemetry"] = {}
+            
         for extractor in self._extractors:
             extracted = extractor.extract(text)
             if extracted:
+                state["extracted_telemetry"].update(extracted)
                 extracted_any = True
-            state["gathered_data"].update(extracted)
 
-        # Dynamic LLM Extractor
-        if self._llm_service and missing_root_before:
-            dynamic_extracted = self._llm_service.extract_variables(user_query, missing_root_before)
-            if dynamic_extracted:
-                extracted_any = True
-                state["gathered_data"].update(dynamic_extracted)
-
-        # Anti-looping fallback for dummy extractors:
-        if missing_root_before and not extracted_any:
-            for group in _QUESTION_GROUPS:
-                group_missing = [v for v in group["vars"] if v in missing_root_before]
-                if group_missing:
-                    for var in group_missing:
-                        if "temperature" in var:
-                            state["gathered_data"][var] = 98.6
-                        elif "blood_pressure" in var:
-                            state["gathered_data"][var] = 120
-                        elif "bmi" in var:
-                            state["gathered_data"][var] = 22.0
-                        else:
-                            state["gathered_data"][var] = "Patient Answered"
-                    break
-
-        # Helper to dynamically evaluate steps assigned to a specific phase
-        def evaluate_phase_steps(phase_name: str, eval_context: str = "") -> bool:
-            if not self._llm_service or self._llm_service.use_fallback:
-                return False
-                
-            evaluated_any_in_phase = False
-            evaluated_any_in_loop = True
-            while evaluated_any_in_loop:
-                evaluated_any_in_loop = False
-                for step in steps:
-                    if step.get("node_type", "processing") != phase_name:
-                        continue
-                    
-                    inputs = step.get("inputs", [])
-                    outputs = step.get("outputs", [])
-                    if not outputs:
-                        continue
-                    
-                    missing_outputs = [o for o in outputs if o not in state["gathered_data"]]
-                    if not missing_outputs:
-                        continue
-                        
-                    missing_step_inputs = [i for i in inputs if i not in state["gathered_data"]]
-                    if not missing_step_inputs:
-                        step_inputs_data = {k: state["gathered_data"][k] for k in inputs}
-                        result = self._llm_service.evaluate_step(
-                            step.get("name", "Unknown Step"), 
-                            step_inputs_data, 
-                            missing_outputs, 
-                            context=eval_context
-                        )
-                        if result:
-                            state["gathered_data"].update(result)
-                            evaluated_any_in_loop = True
-                            evaluated_any_in_phase = True
-            return evaluated_any_in_phase
-
-        # PHASE 1: DATA GATHERING NODE
-        evaluate_phase_steps("data_gathering")
-
-        # Check if we're still missing root variables
-        missing_root_inputs = [
-            x for x in root_inputs
-            if x not in state["gathered_data"]
-        ]
-
-        selected_chunks = []
-
-        if missing_root_inputs:
-            # Stay in data gathering loop
-            state["current_node"] = "data_gathering"
-            
-            # Dynamic Question Generation
+        # RAG / Schema Hydration (Strict Prompt Containment)
+        context, selected_chunks, rejected = await self._rag_engine.retrieve_context(
+            UUID(state["config_id"]), user_query
+        )
+        # Limit to top 3 chunks
+        selected_chunks = selected_chunks[:3]
+        state["retrieved_context"] = context
+        
+        # Evaluate Saturation
+        expected_schema = current_task.get("task_config", {}).get("required_variables", [])
+        conf_score, should_transition = self._saturation_gate.evaluate(
+            expected_schema, state["extracted_telemetry"]
+        )
+        state["classification_score"] = conf_score
+        
+        if not should_transition:
+            # Stay in Node 1
             if self._llm_service and not self._llm_service.use_fallback:
+                missing = [v for v in expected_schema if v not in state["extracted_telemetry"]]
                 state["output_message"] = self._llm_service.generate_followup(
-                    missing_root_inputs, state["gathered_data"]
+                    missing, state["extracted_telemetry"]
                 )
             else:
-                state["output_message"] = _build_doctor_followup(
-                    missing_root_inputs, state["gathered_data"]
+                state["output_message"] = f"Please tell me more about: {expected_schema}"
+            await self._save_state(session_id, state)
+            return state
+
+        # ---- NODE 2: DATA PROCESSING ----
+        state["current_node"] = "processing"
+        strategy_id = current_task.get("strategy_identifier")
+        escalations = []
+        
+        if strategy_id:
+            try:
+                strategy = StrategyRegistry.resolve(strategy_id)
+                # Dispatch execution dynamically
+                processed_data, strat_escalations = await strategy.process(
+                    state["extracted_telemetry"], thresholds, context
                 )
-        else:
-            # Context Retrieval via Hybrid RAG
-            context, selected_chunks, rejected = await self._rag_engine.retrieve_context(
-                config_id, user_query,
+                state["extracted_telemetry"].update(processed_data)
+                escalations.extend(strat_escalations)
+            except KeyError:
+                logger.error(f"Strategy {strategy_id} not found in registry.")
+
+        # ---- NODE 3: HUMAN INTERCEPT ----
+        state["current_node"] = "human_intercept"
+        
+        # Apply injected global safety rules (Fallback)
+        for rule in self._safety_rules:
+            is_anomaly, reason = rule.evaluate(state["extracted_telemetry"], conf_score, thresholds=thresholds)
+            if is_anomaly:
+                escalations.append(reason)
+                
+        if escalations:
+            state["requires_review"] = True
+            state["is_paused"] = True
+            state["session_status"] = "PENDING_REVIEW"
+            escalation_details = "; ".join(escalations)
+            state["output_message"] = (
+                f"I've identified findings that need immediate attention: {escalation_details}. "
+                f"I'm connecting you directly with the doctor."
             )
-            state["retrieved_context"] = context
+            await self._save_state(session_id, state)
+            return state
             
-            # PHASE 2: PROCESSING NODE
-            state["current_node"] = "processing"
-            evaluate_phase_steps("processing", eval_context=context)
-
-            # Get classification score from top chunk
-            top_score = (
-                selected_chunks[0]["combined_score"] if selected_chunks else 0.0
-            )
-            state["classification_score"] = top_score
-
-            # PHASE 3: HUMAN INTERCEPT NODE
-            evaluate_phase_steps("human_intercept", eval_context=context)
-
-            # Check Hardcoded Safety Rules
-            anomaly_reasons = []
-            for rule in self._safety_rules:
-                is_anomaly, reason = rule.evaluate(
-                    state["gathered_data"], top_score,
-                )
-                if is_anomaly:
-                    anomaly_reasons.append(reason)
-                    
-            # Check Dynamic Safety Rules (from workflow configuration)
-            for step in steps:
-                if step.get("node_type", "processing") == "human_intercept":
-                    for output_var in step.get("outputs", []):
-                        val = str(state["gathered_data"].get(output_var, "")).lower()
-                        if val in ["high", "severe", "critical", "true", "escalate", "yes"]:
-                            anomaly_reasons.append(f"Dynamic Rule '{step.get('name')}' output '{output_var}' flagged as '{val}'")
-
-            if anomaly_reasons:
-                # Human Intercept — freeze thread
-                state["current_node"] = "human_intercept"
-                state["requires_review"] = True
-                state["is_paused"] = True
-
-                # Build an urgent but reassuring message
-                concern_details = "; ".join(anomaly_reasons)
-                state["output_message"] = (
-                    f"I want to be transparent with you — based on what you've shared, "
-                    f"I've identified some findings that need immediate attention: "
-                    f"{concern_details}. "
-                    f"\n\nFor your safety, I'm connecting you directly with the doctor "
-                    f"for an urgent review. Please stay where you are — if you're "
-                    f"experiencing severe symptoms, please call emergency services (112) immediately."
-                )
-            else:
-                # PHASE 4: ACTION DISPATCH NODE
-                state["current_node"] = "action_dispatch"
-                evaluate_phase_steps("action_dispatch", eval_context=context)
-
-                # Build a doctor-like assessment summary
-                gathered = state["gathered_data"]
-                summary_parts = ["Thank you for providing all that information. Here's my initial assessment:\n"]
-
-                # Vitals summary
-                if "temperature" in gathered or "blood_pressure_systolic" in gathered:
-                    summary_parts.append("**Vitals Review:**")
-                    if "temperature" in gathered:
-                        temp = gathered["temperature"]
-                        if temp >= 100.4:
-                            summary_parts.append(f"  • Temperature: {temp}°F (elevated — will monitor)")
-                        else:
-                            summary_parts.append(f"  • Temperature: {temp}°F (normal)")
-                    if "blood_pressure_systolic" in gathered:
-                        sys = gathered.get("blood_pressure_systolic", 0)
-                        dia = gathered.get("blood_pressure_diastolic", "N/A")
-                        if sys >= 140:
-                            summary_parts.append(f"  • Blood Pressure: {sys}/{dia} mmHg (elevated — recommend follow-up)")
-                        else:
-                            summary_parts.append(f"  • Blood Pressure: {sys}/{dia} mmHg (within acceptable range)")
-
-                # Guideline-based recommendation from RAG
-                if selected_chunks:
-                    summary_parts.append(f"\n**Clinical Guidance:**")
-                    summary_parts.append(f"  {selected_chunks[0]['content']}")
-
-                summary_parts.append("\nI'll share these findings with the doctor ahead of your visit. "
-                                     "Do you have any other concerns you'd like to discuss?")
-
-                state["output_message"] = "\n".join(summary_parts)
-
-        # 7. Write telemetry trace
-        chunk_ids = [UUID(c["chunk_id"]) for c in selected_chunks]
-        await self._session_repo.create_execution_trace(
-            session_id, state["current_node"], user_query,
-            state["output_message"], chunk_ids, state["classification_score"],
+        # ---- NODE 4: ACTION DISPATCH ----
+        state["current_node"] = "action_dispatch"
+        
+        # Advance the step since this task completed without escalation
+        state["current_step_index"] += 1
+        
+        # Final message formulation
+        state["output_message"] = (
+            "I've gathered the necessary information for this step. Let's proceed."
         )
 
-        # 8. Save updated session checkpoint
+        await self._save_state(session_id, state)
+        return state
+
+    async def _save_state(self, session_id: UUID, state: AgentState):
+        chunk_ids = []
+        await self._session_repo.create_execution_trace(
+            session_id, state["current_node"], state["user_query"],
+            state["output_message"], chunk_ids, state["classification_score"],
+        )
         await self._session_repo.save_active_session(
-            session_id, UUID(state["conversation_id"]), config_id,
+            session_id, UUID(state["conversation_id"]), UUID(state["config_id"]),
             state["current_node"], state,
             state["is_paused"], state["requires_review"],
         )
 
-        return state
-
     async def execute_synthesis_subgraph(self, session_id: UUID, is_partial: bool, reason: str):
-        """
-        Background Task 2: Clinical Synthesis.
-        This represents the background execution of the LangGraph node for synthesis.
-        """
-        logger.info(f"LangGraph executing synthesis subgraph for session {session_id} (Partial: {is_partial})")
-        
+        logger.info(f"LangGraph executing synthesis subgraph for session {session_id}")
         if not self._preconsult_repo or not self._embedding_service:
-            logger.error("Synthesis dependencies not injected into orchestrator.")
             return
-
         try:
-            # 1. Gather all data (in a real LangGraph setup, we'd invoke the LLM with session history)
-            # Here we simulate the LLM output.
             structured_data = {
-                "chief_complaint": "Sample extracted complaint",
                 "is_partial": is_partial,
                 "reason": reason
             }
-            
-            # 2. Vectorize the data
             embedding = self._embedding_service.get_embedding(str(structured_data))
-            
-            # 3. Call the atomic RPC to safely insert and update state
             await self._preconsult_repo.atomic_insert_summary_and_update_state(
                 session_id=session_id,
                 structured_data=structured_data,
                 summary_embedding=embedding
             )
-            logger.info(f"LangGraph synthesis complete for session {session_id}.")
         except Exception as e:
-            logger.error(f"Synthesis subgraph failed for session {session_id}: {e}")
+            logger.error(f"Synthesis failed: {e}")

@@ -148,13 +148,55 @@ class SessionRepository(ABC):
         ...
 
 
+class WorkflowRepository(ABC):
+    """Persistence contract for doctor_workflows and workflow_tasks."""
+    
+    @abstractmethod
+    async def get_workflow(self, workflow_id: UUID) -> Optional[Dict[str, Any]]:
+        ...
+
+    @abstractmethod
+    async def get_workflow_tasks(self, workflow_id: UUID) -> List[Dict[str, Any]]:
+        ...
+
+    @abstractmethod
+    async def get_task_by_step(self, workflow_id: UUID, step_number: int) -> Optional[Dict[str, Any]]:
+        ...
+
+    @abstractmethod
+    async def create_workflow(self, config_id: UUID, doctor_id: str, workflow_name: str) -> Dict[str, Any]:
+        ...
+
+    @abstractmethod
+    async def create_workflow_tasks(self, workflow_id: UUID, tasks: List[Dict[str, Any]]) -> None:
+        ...
+
+
+class ThresholdRepository(ABC):
+    """Persistence contract for journalist_entity_thresholds."""
+    
+    @abstractmethod
+    async def get_thresholds_for_doctor(self, doctor_id: str) -> List[Dict[str, Any]]:
+        ...
+
+    @abstractmethod
+    async def get_threshold_by_entity(self, doctor_id: str, entity_name: str) -> Optional[Dict[str, Any]]:
+        ...
+
+    @abstractmethod
+    async def save_thresholds(self, config_id: UUID, doctor_id: str, thresholds: List[Dict[str, Any]]) -> None:
+        ...
+
+
 class PreConsultRepository(ABC):
     """
     Persistence contract for Pre-Consultation Workflow.
     """
 
     @abstractmethod
-    async def create_session(self, patient_id: UUID, config_id: UUID) -> Dict[str, Any]:
+    async def create_session(
+        self, patient_id: UUID, config_id: UUID, workflow_id: UUID, configuration_snapshot: Dict[str, Any]
+    ) -> Dict[str, Any]:
         ...
 
     @abstractmethod

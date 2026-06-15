@@ -111,3 +111,4 @@ Return ONLY a valid JSON object mapping each requested output variable to its co
         except Exception as e:
             logger.error(f"Error evaluating step {step_name}: {e}")
             return {}
+    
