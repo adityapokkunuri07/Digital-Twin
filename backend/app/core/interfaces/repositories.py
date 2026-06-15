@@ -34,6 +34,11 @@ class ConfigRepository(ABC):
         """Retrieve a configuration by its ID. Returns None if not found."""
         ...
 
+    @abstractmethod
+    async def list_configs(self, doctor_id: UUID) -> List[Dict[str, Any]]:
+        """List all configurations for a given doctor."""
+        ...
+
 
 class KnowledgeRepository(ABC):
     """
@@ -55,14 +60,14 @@ class KnowledgeRepository(ABC):
 
     @abstractmethod
     async def match_knowledge_chunks(
-        self, embedding: List[float], threshold: float, limit: int
+        self, embedding: List[float], threshold: float, limit: int, operational_mode: str = None
     ) -> List[Dict[str, Any]]:
         """Perform vector similarity search via pgvector HNSW index."""
         ...
 
     @abstractmethod
     async def match_knowledge_chunks_lexical(
-        self, query_text: str, threshold: float, limit: int
+        self, query_text: str, threshold: float, limit: int, operational_mode: str = None
     ) -> List[Dict[str, Any]]:
         """Perform trigram-based lexical similarity search."""
         ...

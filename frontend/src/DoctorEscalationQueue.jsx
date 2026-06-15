@@ -11,6 +11,8 @@ export default function DoctorEscalationQueue() {
   const [escalationContext, setEscalationContext] = useState(null);
   const [doctorNotes, setDoctorNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [directMessage, setDirectMessage] = useState('');
+  const [sendingMsg, setSendingMsg] = useState(false);
 
   useEffect(() => {
     fetchQueue();
@@ -38,6 +40,7 @@ export default function DoctorEscalationQueue() {
     setSessionDetails(null);
     setEscalationContext(null);
     setDoctorNotes('');
+    setDirectMessage('');
     
     try {
       const [resDetails, resContext] = await Promise.all([
@@ -78,6 +81,33 @@ export default function DoctorEscalationQueue() {
       alert("Failed to align and release");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const sendDirectMessage = async () => {
+    if (!selectedSession || !directMessage.trim()) return;
+    setSendingMsg(true);
+    
+    try {
+      const res = await fetch(`${API_BASE}/session/${selectedSession.session_id}/doctor-inject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: directMessage })
+      });
+      
+      if (res.ok) {
+        alert("Direct message sent to patient successfully.");
+        setDirectMessage('');
+        // Refresh session details to show the new message
+        selectSession(selectedSession);
+      } else {
+        alert("Failed to send direct message");
+      }
+    } catch (err) {
+      console.error("Failed to send direct message", err);
+      alert("Failed to send direct message");
+    } finally {
+      setSendingMsg(false);
     }
   };
 
@@ -195,6 +225,25 @@ export default function DoctorEscalationQueue() {
                 style={{ padding: '14px', borderRadius: '16px', fontWeight: 600, fontSize: '15px' }}
               >
                 {submitting ? 'Processing...' : 'Align & Release for Booking'}
+              </button>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px', padding: '16px', background: 'rgba(10, 132, 255, 0.05)', borderRadius: '16px', border: '1px solid rgba(10, 132, 255, 0.2)' }}>
+              <h5 style={{ margin: 0, fontSize: '13px', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>DIRECT PATIENT MESSAGE (INTERCEPT)</h5>
+              <textarea 
+                className="form-input" 
+                style={{ minHeight: '80px', fontSize: '14px', borderRadius: '16px', background: 'rgba(0,0,0,0.3)', borderColor: 'rgba(10, 132, 255, 0.3)' }} 
+                placeholder="Send a direct message to the patient (bypasses AI)..."
+                value={directMessage}
+                onChange={e => setDirectMessage(e.target.value)}
+              />
+              <button 
+                className="btn btn-primary" 
+                onClick={sendDirectMessage} 
+                disabled={sendingMsg || !directMessage.trim()}
+                style={{ padding: '12px', borderRadius: '16px', fontWeight: 600, fontSize: '14px' }}
+              >
+                {sendingMsg ? 'Sending...' : 'Send Direct Message'}
               </button>
             </div>
           </>

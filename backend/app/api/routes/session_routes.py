@@ -5,12 +5,16 @@ Single Responsibility: Parse request → delegate to orchestrator → return res
 """
 from fastapi import APIRouter, Depends
 
+from uuid import UUID
+
 from backend.app.api.schemas.session_schemas import (
     InitiateSessionRequest,
     QuerySessionRequest,
+    DoctorInjectRequest,
 )
-from backend.app.api.dependencies import get_orchestrator
+from backend.app.api.dependencies import get_orchestrator, get_preconsult_service
 from backend.app.orchestrator.state_machine import ZeroTrustOrchestrator
+from backend.app.services.preconsult_service import PreConsultationService
 
 router = APIRouter(prefix="/session", tags=["Session"])
 
@@ -34,6 +38,17 @@ async def query_session(
 ):
     """Send a user query to an active session for state machine processing."""
     state = await orch.run_step(payload.session_id, payload.query)
+    return state
+
+
+@router.post("/{session_id}/doctor-inject")
+async def doctor_inject_message(
+    session_id: UUID,
+    payload: DoctorInjectRequest,
+    service: PreConsultationService = Depends(get_preconsult_service),
+):
+    """Inject a doctor's message into a session."""
+    state = await service.inject_doctor_message(session_id, payload.message)
     return state
 
 

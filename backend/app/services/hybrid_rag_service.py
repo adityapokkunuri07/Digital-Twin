@@ -16,7 +16,7 @@ class HybridRAGEngine:
         self.confidence_gate = 0.85
 
     async def retrieve_context(
-        self, config_id: UUID, query_text: str, limit: int = 5
+        self, config_id: UUID, query_text: str, limit: int = 5, operational_mode: str = None
     ) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Retrieves hydrated and deduplicated parent context based on query text.
@@ -32,8 +32,8 @@ class HybridRAGEngine:
         # 2. Run multi-lane search in parallel
         # Lane A: Vector search (HNSW cosine similarity)
         # Lane B: Lexical search (trigram matching)
-        vector_task = self.db.match_knowledge_chunks(query_embedding, threshold=0.0, limit=20)
-        lexical_task = self.db.match_knowledge_chunks_lexical(query_text, threshold=0.0, limit=20)
+        vector_task = self.db.match_knowledge_chunks(query_embedding, threshold=0.0, limit=20, operational_mode=operational_mode)
+        lexical_task = self.db.match_knowledge_chunks_lexical(query_text, threshold=0.0, limit=20, operational_mode=operational_mode)
         
         vector_results, lexical_results = await asyncio.gather(vector_task, lexical_task)
 

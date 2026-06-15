@@ -533,13 +533,13 @@ export default function App() {
       }
     };
     window.addEventListener('popstate', handlePopState);
-    
+
     // Check initial path to set activeTab if needed
     if (window.location.pathname.includes('rag-ingestion')) setActiveTab('rag');
     else if (window.location.pathname.includes('obsidian-mapping')) setActiveTab('obsidian');
     else if (window.location.pathname.includes('pre-consult')) setActiveTab('pre-consult');
     else if (window.location.pathname.includes('workflow')) setActiveTab('workflow');
-    
+
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
@@ -648,6 +648,29 @@ export default function App() {
   };
 
   // --- API Handlers ---
+  const loadConfigFromDB = async (cid) => {
+    if (apiStatus !== 'online') return;
+    try {
+      const res = await fetch(`${API_BASE}/config/${cid}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.workflow_config && data.workflow_config.steps) {
+          setSteps(data.workflow_config.steps);
+          if (data.workflow_config.autopilot !== undefined) {
+            setAutopilot(data.workflow_config.autopilot);
+          }
+          if (data.active_version) {
+            setActiveVersion(data.active_version);
+          }
+          setIsFeasible(data.is_feasible);
+          setValidationErrors(data.validation_errors || []);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load config dynamically", err);
+    }
+  };
+
   const handleValidateConfig = async (currentSteps = steps) => {
     const payload = {
       workflow_config: { steps: currentSteps }
@@ -782,8 +805,9 @@ export default function App() {
   useEffect(() => {
     if (apiStatus === 'online') {
       handleSyncObsidian(true);
+      loadConfigFromDB(configId);
     }
-  }, [apiStatus]);
+  }, [apiStatus, configId]);
 
 
 
@@ -1141,7 +1165,7 @@ export default function App() {
     const inputs = newStep.inputs.split(',').map(x => x.trim()).filter(Boolean);
     const outputs = newStep.outputs.split(',').map(x => x.trim()).filter(Boolean);
     const deps = newStep.dependencies.split(',').map(x => x.trim().replace(/\s+/g, '_')).filter(Boolean);
-    
+
     // Generate sequential step ID instead of random UUID so users can easily chain dependencies
     let maxId = 0;
     steps.forEach(s => {
@@ -1157,6 +1181,51 @@ export default function App() {
     setNewStep({ name: '', inputs: '', outputs: '', dependencies: '', node_type: 'processing' });
     handleValidateConfig(updated);
   };
+
+  const addTaskField = () => {
+    setNewTasks(prev => [...prev, { name: '', inputs: '', outputs: '', dependencies: '' }]);
+  };
+
+  const updateNewTask = (idx, field, value) => {
+    setNewTasks(prev => prev.map((t, i) => i === idx ? { ...t, [field]: value } : t));
+  };
+
+  const removeNewTask = (idx) => {
+    setNewTasks(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const addAllTasks = () => {
+    if (!newTasks || newTasks.length === 0) return;
+
+    let currentSteps = [...steps];
+    const created = [];
+
+    newTasks.forEach(t => {
+      if (!t.name) return;
+      const inputs = (t.inputs || '').split(',').map(x => x.trim()).filter(Boolean);
+      const outputs = (t.outputs || '').split(',').map(x => x.trim()).filter(Boolean);
+      const deps = (t.dependencies || '').split(',').map(x => x.trim().replace(/\s+/g, '_')).filter(Boolean);
+
+      let maxId = 0;
+      const allTempSteps = [...currentSteps, ...created];
+      allTempSteps.forEach(s => {
+        const parts = s.id.split('_');
+        if (parts.length === 2 && !isNaN(parts[1])) {
+          maxId = Math.max(maxId, parseInt(parts[1], 10));
+        }
+      });
+      const sid = maxId > 0 ? `step_${maxId + 1}` : `step_${allTempSteps.length + 1}`;
+
+      created.push({ id: sid, name: t.name, inputs, outputs, dependencies: deps });
+    });
+
+    if (created.length === 0) return;
+    const updated = [...steps, ...created];
+    setSteps(updated);
+    setNewTasks([]);
+    handleValidateConfig(updated);
+  };
+
 
   const handleNewWorkflow = () => {
     if (window.confirm("Are you sure you want to clear the current workflow and start a new one?")) {
@@ -1392,26 +1461,26 @@ ${file.content || ''}
                     }}>
                       <div>
                         <h4 style={{ fontWeight: 600 }}>
-                          {idx + 1}. {step.name} <span style={{fontSize: '13px', fontWeight: 400, color: 'var(--text-muted)'}}>({step.id})</span>
+                          {idx + 1}. {step.name} <span style={{ fontSize: '13px', fontWeight: 400, color: 'var(--text-muted)' }}>({step.id})</span>
                           <span style={{
                             marginLeft: '8px',
                             padding: '2px 8px',
                             borderRadius: '12px',
                             fontSize: '10px',
                             fontWeight: 'bold',
-                            backgroundColor: step.node_type === 'data_gathering' ? 'rgba(59, 130, 246, 0.2)' : 
-                                           step.node_type === 'processing' ? 'rgba(16, 185, 129, 0.2)' :
-                                           step.node_type === 'human_intercept' ? 'rgba(239, 68, 68, 0.2)' :
-                                           'rgba(245, 158, 11, 0.2)',
+                            backgroundColor: step.node_type === 'data_gathering' ? 'rgba(59, 130, 246, 0.2)' :
+                              step.node_type === 'processing' ? 'rgba(16, 185, 129, 0.2)' :
+                                step.node_type === 'human_intercept' ? 'rgba(239, 68, 68, 0.2)' :
+                                  'rgba(245, 158, 11, 0.2)',
                             color: step.node_type === 'data_gathering' ? '#60a5fa' :
-                                   step.node_type === 'processing' ? '#34d399' :
-                                   step.node_type === 'human_intercept' ? '#f87171' :
-                                   '#fbbf24'
+                              step.node_type === 'processing' ? '#34d399' :
+                                step.node_type === 'human_intercept' ? '#f87171' :
+                                  '#fbbf24'
                           }}>
-                            {step.node_type === 'data_gathering' ? 'DATA GATHERING' : 
-                             step.node_type === 'processing' ? 'PROCESSING' : 
-                             step.node_type === 'human_intercept' ? 'HUMAN INTERCEPT' : 
-                             'ACTION DISPATCH'}
+                            {step.node_type === 'data_gathering' ? 'DATA GATHERING' :
+                              step.node_type === 'processing' ? 'PROCESSING' :
+                                step.node_type === 'human_intercept' ? 'HUMAN INTERCEPT' :
+                                  'ACTION DISPATCH'}
                           </span>
                         </h4>
                         <div style={{ display: 'flex', gap: '16px', fontSize: '12px', marginTop: '6px', color: 'var(--text-secondary)' }}>
@@ -1462,64 +1531,64 @@ ${file.content || ''}
                 {/* Add step Panel */}
                 <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   <h3 style={{ fontSize: '18px' }}>Add Step</h3>
-                <div className="input-group">
-                  <span className="input-label">Step Name</span>
-                  <input
-                    className="form-input"
-                    placeholder="e.g. Dose Check"
-                    value={newStep.name}
-                    onChange={e => setNewStep({ ...newStep, name: e.target.value })}
-                  />
+                  <div className="input-group">
+                    <span className="input-label">Step Name</span>
+                    <input
+                      className="form-input"
+                      placeholder="e.g. Dose Check"
+                      value={newStep.name}
+                      onChange={e => setNewStep({ ...newStep, name: e.target.value })}
+                    />
+                  </div>
+                  <div className="input-group">
+                    <span className="input-label">Execution Phase</span>
+                    <select
+                      className="form-input"
+                      value={newStep.node_type}
+                      onChange={e => setNewStep({ ...newStep, node_type: e.target.value })}
+                      style={{ background: 'var(--bg-card)', color: 'var(--text-primary)', cursor: 'pointer' }}
+                    >
+                      <option value="data_gathering">Data Gathering</option>
+                      <option value="processing">Processing</option>
+                      <option value="human_intercept">Human Intercept (Safety)</option>
+                      <option value="action_dispatch">Action Dispatch</option>
+                    </select>
+                  </div>
+                  <div className="input-group">
+                    <span className="input-label">Inputs (comma separated)</span>
+                    <input
+                      className="form-input"
+                      placeholder="e.g. diagnosis_summary"
+                      value={newStep.inputs}
+                      onChange={e => setNewStep({ ...newStep, inputs: e.target.value })}
+                    />
+                  </div>
+                  <div className="input-group">
+                    <span className="input-label">Outputs (comma separated)</span>
+                    <input
+                      className="form-input"
+                      placeholder="e.g. final_dose"
+                      value={newStep.outputs}
+                      onChange={e => setNewStep({ ...newStep, outputs: e.target.value })}
+                    />
+                  </div>
+                  <div className="input-group">
+                    <span className="input-label">Dependencies (step IDs)</span>
+                    <input
+                      className="form-input"
+                      placeholder="e.g. step_2"
+                      value={newStep.dependencies}
+                      onChange={e => setNewStep({ ...newStep, dependencies: e.target.value })}
+                    />
+                  </div>
+                  <button className="btn btn-primary" onClick={addWorkflowStep}>
+                    Add Step
+                  </button>
+                  <button className="btn btn-accent" onClick={handleSaveConfig} style={{ marginTop: '12px' }}>
+                    Save Config & Compile
+                  </button>
                 </div>
-                <div className="input-group">
-                  <span className="input-label">Execution Phase</span>
-                  <select
-                    className="form-input"
-                    value={newStep.node_type}
-                    onChange={e => setNewStep({ ...newStep, node_type: e.target.value })}
-                    style={{ background: 'var(--bg-card)', color: 'var(--text-primary)', cursor: 'pointer' }}
-                  >
-                    <option value="data_gathering">Data Gathering</option>
-                    <option value="processing">Processing</option>
-                    <option value="human_intercept">Human Intercept (Safety)</option>
-                    <option value="action_dispatch">Action Dispatch</option>
-                  </select>
-                </div>
-                <div className="input-group">
-                  <span className="input-label">Inputs (comma separated)</span>
-                  <input
-                    className="form-input"
-                    placeholder="e.g. diagnosis_summary"
-                    value={newStep.inputs}
-                    onChange={e => setNewStep({ ...newStep, inputs: e.target.value })}
-                  />
-                </div>
-                <div className="input-group">
-                  <span className="input-label">Outputs (comma separated)</span>
-                  <input
-                    className="form-input"
-                    placeholder="e.g. final_dose"
-                    value={newStep.outputs}
-                    onChange={e => setNewStep({ ...newStep, outputs: e.target.value })}
-                  />
-                </div>
-                <div className="input-group">
-                  <span className="input-label">Dependencies (step IDs)</span>
-                  <input
-                    className="form-input"
-                    placeholder="e.g. step_2"
-                    value={newStep.dependencies}
-                    onChange={e => setNewStep({ ...newStep, dependencies: e.target.value })}
-                  />
-                </div>
-                <button className="btn btn-primary" onClick={addWorkflowStep}>
-                  Add Step
-                </button>
-                <button className="btn btn-accent" onClick={handleSaveConfig} style={{ marginTop: '12px' }}>
-                  Save Config & Compile
-                </button>
               </div>
-            </div>
             </div>
           </div>
         )}

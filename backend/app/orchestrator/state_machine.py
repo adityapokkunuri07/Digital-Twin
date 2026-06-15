@@ -21,6 +21,7 @@ from backend.app.orchestrator.safety_rules.base import SafetyRule
 from backend.app.core.interfaces.embedding import EmbeddingService
 from backend.app.orchestrator.confidence_gate import KnowledgeSaturationGate
 from backend.app.orchestrator.strategies.registry import StrategyRegistry
+from backend.app.services.context_synthesizer import ContextSynthesizer
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,9 @@ class AgentState(TypedDict):
     is_paused: bool
     classification_score: float
     history: List[Dict[str, Any]]
+    doctor_override_message: str
+    patient_consent_granted: bool
+    pending_action: str
 
 
 class ZeroTrustOrchestrator:

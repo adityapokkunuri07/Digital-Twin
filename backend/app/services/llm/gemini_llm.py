@@ -56,7 +56,7 @@ Return ONLY a valid JSON object where keys are the extracted variables.
             logger.error(f"Error extracting variables: {e}")
             return {}
 
-    def generate_followup(self, missing_inputs: List[str], gathered: Dict[str, Any]) -> str:
+    def generate_followup(self, missing_inputs: List[str], gathered: Dict[str, Any], context_window: str = "") -> str:
         """Dynamically generate an empathetic follow-up question."""
         if self.use_fallback:
             return f"Could you please tell me about: {', '.join(missing_inputs)}?"
@@ -64,6 +64,9 @@ Return ONLY a valid JSON object where keys are the extracted variables.
         prompt = f"""
 You are an empathetic, professional AI doctor assistant.
 The patient has already provided the following information: {gathered}.
+Additional Context/History:
+{context_window}
+
 You need to ask them about these missing variables: {missing_inputs}.
 Formulate a natural, conversational, and empathetic follow-up question.
 Acknowledge what they've already shared briefly.
@@ -81,7 +84,7 @@ Keep it concise and professional.
             logger.error(f"Error generating follow-up: {e}")
             return f"Could you please provide information about: {', '.join(missing_inputs)}?"
 
-    def evaluate_step(self, step_name: str, inputs: Dict[str, Any], outputs: List[str], context: str = "") -> Dict[str, Any]:
+    def evaluate_step(self, step_name: str, inputs: Dict[str, Any], outputs: List[str], context_window: str = "") -> Dict[str, Any]:
         """Evaluate an intermediate workflow step using LLM reasoning."""
         if not outputs:
             return {}
@@ -93,7 +96,7 @@ You are an expert clinical reasoning engine.
 Your task is to execute a step in a medical workflow.
 Step Name: {step_name}
 Inputs available: {inputs}
-Additional Medical Context (if any): {context}
+Additional Medical Context/History (if any): {context_window}
 
 Based on the inputs and clinical knowledge, compute and return the following outputs: {outputs}.
 Return ONLY a valid JSON object mapping each requested output variable to its computed value.
