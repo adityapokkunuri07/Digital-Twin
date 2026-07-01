@@ -49,7 +49,7 @@ class DoctorReviewRequest(BaseModel):
 class BookAppointmentRequest(BaseModel):
     session_id: UUID
     patient_id: UUID
-    doctor_id: UUID
+    expert_id: UUID
     scheduled_time: datetime
 
 class PreConsultSessionResponse(BaseModel):

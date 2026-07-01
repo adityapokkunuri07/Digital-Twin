@@ -57,7 +57,7 @@ class SupabasePreConsultRepository(SupabaseClientMixin, PreConsultRepository):
         if self.use_mock:
             return self._sessions.get(sid_str)
             
-        res = self.client.table("pre_consultation_sessions").select("*").eq("session_id", sid_str).execute()
+        res = self.client.table("pre_consultation_sessions").select("*, patients!fk_patient(full_name, email)").eq("session_id", sid_str).execute()
         return res.data[0] if res.data else None
 
     async def update_session_state(
@@ -156,60 +156,25 @@ class SupabasePreConsultRepository(SupabaseClientMixin, PreConsultRepository):
             "p_summary_embedding": summary_embedding
         }).execute()
 
-    async def create_appointment(
-        self, patient_id: UUID, session_id: UUID, doctor_id: UUID, scheduled_time: datetime
-    ) -> Dict[str, Any]:
-        record = {
-            "patient_id": str(patient_id),
-            "session_id": str(session_id),
-            "doctor_id": str(doctor_id),
-            "scheduled_time": scheduled_time.isoformat(),
-            "status": "SCHEDULED"
-        }
-        
-        if self.use_mock:
-            self._appointments.append(record)
-            return record
-            
-        res = self.client.table("appointments").insert(record).execute()
-        return res.data[0] if res.data else record
 
-    async def get_patient_appointments(self, patient_id: UUID) -> List[Dict[str, Any]]:
-        """Fetch all appointments for a given patient."""
+
+    async def get_active_sessions(self) -> List[Dict[str, Any]]:
+        """Fetch all sessions currently in active/in-progress states."""
+        active_statuses = [
+            "GATHERING", "SYNTHESIZING", "SYNTHESIZING_PARTIAL",
+            "awaiting_user_input", "processing_synthesis", "processing_partial_synthesis"
+        ]
+
         if self.use_mock:
-            return [a for a in self._appointments if str(a.get("patient_id")) == str(patient_id)]
-            
+            return [s for s in self._sessions.values() if s.get("status") in active_statuses]
+
         try:
-            res = self.client.table("appointments") \
-                .select("*, patients(full_name, email)") \
-                .eq("patient_id", str(patient_id)) \
-                .order("scheduled_time", desc=False) \
+            res = self.client.table("pre_consultation_sessions") \
+                .select("session_id, status, current_confidence_score, turn_count, updated_at, patients!fk_patient(full_name, email)") \
+                .in_("status", active_statuses) \
+                .order("updated_at", desc=True) \
                 .execute()
             return res.data if res.data else []
         except Exception as e:
-            # Fallback to no foreign key if relationship is ambiguous
-            res = self.client.table("appointments") \
-                .select("*") \
-                .eq("patient_id", str(patient_id)) \
-                .order("scheduled_time", desc=False) \
-                .execute()
-            return res.data if res.data else []
-
-    async def get_all_appointments(self) -> List[Dict[str, Any]]:
-        """Fetch all booked appointments across the system."""
-        if self.use_mock:
-            return sorted(self._appointments, key=lambda x: x.get("scheduled_time", ""))
-            
-        try:
-            res = self.client.table("appointments") \
-                .select("*, patients(full_name, email)") \
-                .order("scheduled_time", desc=False) \
-                .execute()
-            return res.data if res.data else []
-        except Exception as e:
-            # Fallback to no foreign key
-            res = self.client.table("appointments") \
-                .select("*") \
-                .order("scheduled_time", desc=False) \
-                .execute()
-            return res.data if res.data else []
+            logger.error(f"Error fetching active sessions: {e}")
+            return []

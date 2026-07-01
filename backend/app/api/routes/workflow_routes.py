@@ -17,7 +17,7 @@ class TaskInput(BaseModel):
 class WorkflowGenerateRequest(BaseModel):
     workflow_name: str
     config_id: str
-    doctor_id: str = "4a8f39b6-89d1-4db8-bbbe-d9616e00b8e2"
+    expert_id: str = "4a8f39b6-89d1-4db8-bbbe-d9616e00b8e2"
     tasks: List[TaskInput]
 
 def get_workflow_generator():
@@ -32,7 +32,13 @@ async def generate_workflow(
     try:
         # 1. Map via LLM
         tasks_input = [{"description": t.description, "actor": t.actor} for t in request.tasks]
-        result = generator.generate_workflow(tasks_input)
+        capabilities_menu = (
+            "- SYMPTOM_PARSER: Extracts and analyzes symptoms, duration, severity, and associated pain.\n"
+            "- LAB_REPORT_ANALYSIS: Analyzes uploaded blood work or lab reports.\n"
+            "- VITALS_VALIDATION: Checks blood pressure, heart rate, or temperature against healthy ranges.\n"
+            "- DIETARY_PLANNER: Synthesizes custom dietary and lifestyle plans.\n"
+        )
+        result = generator.generate_workflow(tasks_input, capabilities_menu)
         
         # 2. Check for rejections
         rejections = []
@@ -51,11 +57,11 @@ async def generate_workflow(
         client = repo.client
         config_id_str = request.config_id
         
-        # Create doctor_workflows entry
-        wf_res = client.table("doctor_workflows").insert({
+        # Create expert_workflows entry
+        wf_res = client.table("expert_workflows").insert({
             "config_id": config_id_str,
             "workflow_name": request.workflow_name,
-            "doctor_id": request.doctor_id
+            "expert_id": request.expert_id
         }).execute()
         
         if not wf_res.data:
@@ -72,7 +78,7 @@ async def generate_workflow(
                 
             assigned_executor = task.get("assigned_executor", "TWIN")
             
-            if assigned_executor == "DOCTOR":
+            if assigned_executor == "EXPERT":
                 alignment = "human_intercept"
             elif strat_id is not None:
                 alignment = "processing"
@@ -97,14 +103,14 @@ async def generate_workflow(
         for th in result.get("thresholds", []):
             thresholds_to_insert.append({
                 "config_id": config_id_str,
-                "doctor_id": request.doctor_id,
+                "expert_id": request.expert_id,
                 "entity_name": th.get("entity_name"),
                 "max_allowable_value": th.get("max_allowable_value"),
                 "critical_escalation_triggers": th.get("critical_escalation_triggers", [])
             })
             
         if thresholds_to_insert:
-            client.table("journalist_entity_thresholds").insert(thresholds_to_insert).execute()
+            client.table("entity_thresholds").insert(thresholds_to_insert).execute()
             
         return {"status": "success", "workflow_id": workflow_id, "generated_plan": result}
 

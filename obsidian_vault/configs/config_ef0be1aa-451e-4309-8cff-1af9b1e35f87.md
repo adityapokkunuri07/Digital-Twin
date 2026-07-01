@@ -1,6 +1,6 @@
 ---
 id: ef0be1aa-451e-4309-8cff-1af9b1e35f87
-doctor_id: 4a8f39b6-89d1-4db8-bbbe-d9616e00b8e2
+expert_id: None
 version: 1.0.0
 feasible: false
 errors: ["Validation Error: Step 'step_1' depends on non-existent step 'step-1'."]

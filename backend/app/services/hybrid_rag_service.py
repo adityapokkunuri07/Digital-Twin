@@ -29,11 +29,11 @@ class HybridRAGEngine:
         # 1. Generate query embedding
         query_embedding = self.embedding_service.get_embedding(query_text)
 
-        # 2. Run multi-lane search in parallel
+        # 2. Run multi-lane search in parallel (scoped by config_id for per-expert isolation)
         # Lane A: Vector search (HNSW cosine similarity)
         # Lane B: Lexical search (trigram matching)
-        vector_task = self.db.match_knowledge_chunks(query_embedding, threshold=0.0, limit=20, operational_mode=operational_mode)
-        lexical_task = self.db.match_knowledge_chunks_lexical(query_text, threshold=0.0, limit=20, operational_mode=operational_mode)
+        vector_task = self.db.match_knowledge_chunks(config_id, query_embedding, threshold=0.0, limit=20, operational_mode=operational_mode)
+        lexical_task = self.db.match_knowledge_chunks_lexical(config_id, query_text, threshold=0.0, limit=20, operational_mode=operational_mode)
         
         vector_results, lexical_results = await asyncio.gather(vector_task, lexical_task)
 

@@ -4,6 +4,8 @@ import logging
 import httpx
 import asyncpg
 
+from backend.app.core.enums import SessionStatus
+
 logger = logging.getLogger("SagaOrchestrator")
 
 def generate_idempotency_key(session_id: str, date: str, slot: str) -> str:
@@ -33,7 +35,7 @@ class SagaOrchestrator:
             # 1. Local Intent Lock
             await conn.execute(
                 "UPDATE pre_consultation_sessions SET status = $1 WHERE session_id = $2",
-                "INITIATING_BOOKING", session_id
+                SessionStatus.PROCESSING_BOOKING, session_id
             )
             
             # Fetch necessary payload details (abstracted for brevity)
@@ -57,15 +59,15 @@ class SagaOrchestrator:
                         ext_booking_id = response.json().get("booking_id", "unknown")
                         await conn.execute(
                             "UPDATE pre_consultation_sessions SET status = $1 WHERE session_id = $2",
-                            "BOOKED", session_id
+                            SessionStatus.COMPLETE_BOOKED, session_id
                         )
-                        return "BOOKED"
+                        return SessionStatus.COMPLETE_BOOKED
                         
                     # Permanent Failure (e.g., 409 Conflict)
                     if response.status_code >= 400 and response.status_code < 500:
                         logger.warning(f"Booking rejected: {response.status_code}. Rolling back.")
                         await self._compensating_rollback(conn, session_id)
-                        return "FAILED_REVIEW"
+                        return SessionStatus.FAILED_BOOKING
 
                     response.raise_for_status()
 
@@ -73,7 +75,7 @@ class SagaOrchestrator:
                     if attempt == self.max_retries:
                         logger.error(f"Saga failed after {self.max_retries} retries: {str(e)}")
                         await self._compensating_rollback(conn, session_id)
-                        return "FAILED_REVIEW"
+                        return SessionStatus.FAILED_BOOKING
                     
                     delay = self.backoff_factor ** attempt
                     logger.info(f"Transient error. Retrying in {delay}s...")
@@ -83,5 +85,5 @@ class SagaOrchestrator:
         """Reverts the local state if the external transaction permanently fails."""
         await conn.execute(
             "UPDATE pre_consultation_sessions SET status = $1 WHERE session_id = $2",
-            "FAILED_REVIEW", session_id
+            SessionStatus.FAILED_BOOKING, session_id
         )

@@ -40,9 +40,9 @@ class ConfigService:
         """Retrieve an expert twin configuration by its ID."""
         return await self._config_repo.get_expert_config(config_id)
 
-    async def list_configs(self, doctor_id: UUID) -> List[Dict[str, Any]]:
-        """List all expert twin configurations for a doctor."""
-        return await self._config_repo.list_configs(doctor_id)
+    async def list_configs(self, expert_id: UUID) -> List[Dict[str, Any]]:
+        """List all expert twin configurations for an expert."""
+        return await self._config_repo.list_configs(expert_id)
 
     def validate_config(
         self, workflow_config: Dict[str, Any]
@@ -53,7 +53,7 @@ class ConfigService:
     async def save_config(
         self,
         config_id: UUID | None,
-        doctor_id: UUID,
+        expert_id: UUID,
         workflow_config: Dict[str, Any],
         active_version: str,
     ) -> Dict[str, Any]:
@@ -70,7 +70,7 @@ class ConfigService:
 
         # 2. Persist config
         record = await self._config_repo.save_expert_config(
-            resolved_config_id, doctor_id, workflow_config,
+            resolved_config_id, expert_id, workflow_config,
             active_version, is_feasible, errors,
         )
 

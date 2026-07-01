@@ -68,57 +68,62 @@ class SupabaseKnowledgeRepository(SupabaseClientMixin, KnowledgeRepository):
             self.client.table("knowledge_chunks").insert(formatted_chunks).execute()
 
     async def match_knowledge_chunks(
-        self, embedding: List[float], threshold: float, limit: int, operational_mode: str = None
+        self, config_id: UUID, embedding: List[float], threshold: float, limit: int, operational_mode: str = None
     ) -> List[Dict[str, Any]]:
+        cid_str = str(config_id)
+
         if self.use_mock:
-            # Simple mock cosine similarity simulation —
-            # returns all stored chunks as if they matched for testing.
+            # Per-expert isolation: only return chunks for the requested config_id
             all_chunks = []
-            for config_chunks in self._knowledge_chunks.values():
-                for c in config_chunks:
-                    if operational_mode and c.get("operational_mode", "LEARN") != operational_mode:
-                        continue
-                    c_copy = c.copy()
-                    c_copy["similarity"] = 0.90  # default mocked score above threshold
-                    all_chunks.append(c_copy)
+            for c in self._knowledge_chunks.get(cid_str, []):
+                if operational_mode and c.get("operational_mode", "LEARN") != operational_mode:
+                    continue
+                c_copy = c.copy()
+                c_copy["similarity"] = 0.90  # default mocked score above threshold
+                all_chunks.append(c_copy)
             return all_chunks[:limit]
 
         # Call the Supabase pgvector match function (HNSW similarity search)
+        # config_id filter enforces per-expert data isolation at the DB layer
         res = self.client.rpc("match_knowledge_chunks_with_mode", {
             "query_embedding": embedding,
             "match_threshold": threshold,
             "match_count": limit,
             "filter_mode": operational_mode,
+            "p_config_id": cid_str,
         }).execute()
         return res.data if res.data else []
 
     async def match_knowledge_chunks_lexical(
-        self, query_text: str, threshold: float, limit: int, operational_mode: str = None
+        self, config_id: UUID, query_text: str, threshold: float, limit: int, operational_mode: str = None
     ) -> List[Dict[str, Any]]:
+        cid_str = str(config_id)
+
         if self.use_mock:
-            # Mock trigram search simulation
+            # Per-expert isolation: only search chunks for the requested config_id
             matches = []
             words = set(query_text.lower().split())
-            for config_chunks in self._knowledge_chunks.values():
-                for c in config_chunks:
-                    if operational_mode and c.get("operational_mode", "LEARN") != operational_mode:
-                        continue
-                    c_words = set(c["content"].lower().split())
-                    common = words.intersection(c_words)
-                    score = len(common) / max(len(words), 1)
-                    if score > threshold or query_text.lower() in c["content"].lower():
-                        c_copy = c.copy()
-                        c_copy["lexical_score"] = max(score, 0.88)
-                        matches.append(c_copy)
+            for c in self._knowledge_chunks.get(cid_str, []):
+                if operational_mode and c.get("operational_mode", "LEARN") != operational_mode:
+                    continue
+                c_words = set(c["content"].lower().split())
+                common = words.intersection(c_words)
+                score = len(common) / max(len(words), 1)
+                if score > threshold or query_text.lower() in c["content"].lower():
+                    c_copy = c.copy()
+                    c_copy["lexical_score"] = max(score, 0.88)
+                    matches.append(c_copy)
             return sorted(
                 matches, key=lambda x: x.get("lexical_score", 0), reverse=True
             )[:limit]
 
+        # config_id filter enforces per-expert data isolation at the DB layer
         res = self.client.rpc("match_knowledge_chunks_lexical_with_mode", {
             "query_text": query_text,
             "match_threshold": threshold,
             "match_limit": limit,
             "filter_mode": operational_mode,
+            "p_config_id": cid_str,
         }).execute()
         return res.data if res.data else []
 

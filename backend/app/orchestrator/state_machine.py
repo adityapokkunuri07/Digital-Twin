@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 import logging
 
 from backend.app.core.interfaces.repositories import ConfigRepository, SessionRepository
+from backend.app.core.enums import SessionStatus
 from backend.app.services.hybrid_rag_service import HybridRAGEngine
 from backend.app.services.llm.gemini_llm import GeminiLLMService
 from backend.app.orchestrator.extractors.base import DataExtractor
@@ -22,6 +23,7 @@ from backend.app.core.interfaces.embedding import EmbeddingService
 from backend.app.orchestrator.confidence_gate import KnowledgeSaturationGate
 from backend.app.orchestrator.strategies.registry import StrategyRegistry
 from backend.app.services.context_synthesizer import ContextSynthesizer
+from backend.app.orchestrator.probing_router import ProbingRouter
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +47,8 @@ class AgentState(TypedDict):
     is_paused: bool
     classification_score: float
     history: List[Dict[str, Any]]
-    doctor_override_message: str
-    patient_consent_granted: bool
+    expert_override_message: str
+    end_user_consent_granted: bool
     pending_action: str
 
 
@@ -87,6 +89,30 @@ class ZeroTrustOrchestrator:
         state: AgentState = session_record["graph_state"]
         state["user_query"] = user_query
 
+        # Node 0: Probing (Dynamic Workflow Determination)
+        if state.get("current_node", "probing") == "probing":
+            probing_router = ProbingRouter(self._llm_service)
+            workflow_id, clarification_msg = probing_router.determine_workflow(user_query)
+            
+            if workflow_id == "clarify":
+                # Stay in probing node
+                state["output_message"] = clarification_msg
+                await self._save_state(session_id, state)
+                return state
+            
+            if workflow_id == "qa":
+                # Handle generic Q&A without advancing to a structured workflow
+                context, _, _ = await self._rag_engine.retrieve_context(UUID(state["config_id"]), user_query)
+                state["output_message"] = "I am a clinical assistant. I can help assess your symptoms."
+                await self._save_state(session_id, state)
+                return state
+                
+            # If we reach here, we found a structured workflow (e.g., 'pre_consultation')
+            state["workflow_id"] = workflow_id
+            state["current_node"] = "data_gathering"
+            # In a real implementation, we would load the 'workflow_id' specific tasks into the configuration_snapshot here
+            # For now, the pre-consultation workflow is already loaded in start_session.
+
         # Lock check
         if state.get("is_paused", False) or state.get("requires_review", False):
             state["output_message"] = "This session has been suspended and is awaiting expert human review."
@@ -111,8 +137,8 @@ class ZeroTrustOrchestrator:
             state["current_node"] = "human_intercept"
             state["requires_review"] = True
             state["is_paused"] = True
-            state["session_status"] = "PENDING_REVIEW"
-            state["output_message"] = "This step requires the doctor's review. You have been placed in the review queue."
+            state["session_status"] = SessionStatus.AWAITING_EXPERT_INTERVENTION
+            state["output_message"] = "This step requires expert review. You have been placed in the review queue."
             await self._save_state(session_id, state)
             return state
 
@@ -131,6 +157,19 @@ class ZeroTrustOrchestrator:
                 state["extracted_telemetry"].update(extracted)
                 extracted_any = True
 
+        expected_schema = current_task.get("task_config", {}).get("required_variables", [])
+        
+        chat_history = ""
+        if self._preconsult_repo:
+            logs = await self._preconsult_repo.get_interaction_logs(session_id)
+            chat_history = "\n".join([f"{log['sender']}: {log['message_text']}" for log in logs[-5:]])
+
+        # LLM EXTRACTION (Replacing redundant preconsult LLM loop)
+        if self._llm_service and not self._llm_service.use_fallback:
+            extracted_llm = self._llm_service.extract_variables(text, expected_schema, chat_history)
+            if extracted_llm:
+                state["extracted_telemetry"].update(extracted_llm)
+
         # RAG / Schema Hydration (Strict Prompt Containment)
         context, selected_chunks, rejected = await self._rag_engine.retrieve_context(
             UUID(state["config_id"]), user_query
@@ -140,7 +179,6 @@ class ZeroTrustOrchestrator:
         state["retrieved_context"] = context
         
         # Evaluate Saturation
-        expected_schema = current_task.get("task_config", {}).get("required_variables", [])
         conf_score, should_transition = self._saturation_gate.evaluate(
             expected_schema, state["extracted_telemetry"]
         )
@@ -151,7 +189,7 @@ class ZeroTrustOrchestrator:
             if self._llm_service and not self._llm_service.use_fallback:
                 missing = [v for v in expected_schema if v not in state["extracted_telemetry"]]
                 state["output_message"] = self._llm_service.generate_followup(
-                    missing, state["extracted_telemetry"]
+                    missing, state["extracted_telemetry"], chat_history
                 )
             else:
                 state["output_message"] = f"Please tell me more about: {expected_schema}"
@@ -190,11 +228,11 @@ class ZeroTrustOrchestrator:
         if escalations:
             state["requires_review"] = True
             state["is_paused"] = True
-            state["session_status"] = "PENDING_REVIEW"
+            state["session_status"] = SessionStatus.AWAITING_EXPERT_INTERVENTION
             escalation_details = "; ".join(escalations)
             state["output_message"] = (
                 f"I've identified findings that need immediate attention: {escalation_details}. "
-                f"I'm connecting you directly with the doctor."
+                f"I'm connecting you directly with the expert."
             )
             await self._save_state(session_id, state)
             return state

@@ -4,10 +4,10 @@
 
 -- Use fixed UUIDs for easy referencing
 -- config_id: '11111111-1111-1111-1111-111111111111'
--- doctor_id: '22222222-2222-2222-2222-222222222222'
+-- expert_id: '22222222-2222-2222-2222-222222222222'
 
 -- 1. Insert Expert Twin Configuration
-INSERT INTO expert_twin_configs (config_id, doctor_id, workflow_config, active_version, is_feasible)
+INSERT INTO expert_twin_configs (config_id, expert_id, workflow_config, active_version, is_feasible)
 VALUES (
     '11111111-1111-1111-1111-111111111111',
     '22222222-2222-2222-2222-222222222222',

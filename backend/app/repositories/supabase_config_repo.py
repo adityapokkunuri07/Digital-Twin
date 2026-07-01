@@ -28,17 +28,17 @@ class SupabaseConfigRepository(SupabaseClientMixin, ConfigRepository):
     async def save_expert_config(
         self,
         config_id: UUID,
-        doctor_id: UUID,
+        expert_id: UUID,
         workflow_config: Dict[str, Any],
         active_version: str,
         is_feasible: bool,
         validation_errors: List[str],
     ) -> Dict[str, Any]:
         cid_str = str(config_id)
-        did_str = str(doctor_id)
+        eid_str = str(expert_id)
         record = {
             "config_id": cid_str,
-            "doctor_id": did_str,
+            "expert_id": eid_str,
             "workflow_config": workflow_config,
             "active_version": active_version,
             "is_feasible": is_feasible,
@@ -66,16 +66,16 @@ class SupabaseConfigRepository(SupabaseClientMixin, ConfigRepository):
         )
         return res.data[0] if res.data else None
 
-    async def list_configs(self, doctor_id: UUID) -> List[Dict[str, Any]]:
-        did_str = str(doctor_id)
+    async def list_configs(self, expert_id: UUID) -> List[Dict[str, Any]]:
+        eid_str = str(expert_id)
         
         if self.use_mock:
-            return [c for c in self._configs.values() if c.get("doctor_id") == did_str]
+            return [c for c in self._configs.values() if c.get("expert_id") == eid_str]
             
         res = (
             self.client.table("expert_twin_configs")
             .select("config_id, active_version, updated_at")
-            .eq("doctor_id", did_str)
+            .eq("expert_id", eid_str)
             .execute()
         )
         return res.data if res.data else []

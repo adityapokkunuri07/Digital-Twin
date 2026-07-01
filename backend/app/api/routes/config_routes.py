@@ -155,21 +155,6 @@ async def sync_obsidian(
     # 3. Compile the response list of files for the frontend
     files_response = []
 
-    # Format configs
-    for config in configs_list:
-        config_id = str(config.get("config_id"))
-        active_version = config.get("active_version", "1.0.0")
-        workflow_config = config.get("workflow_config", {}) or {}
-        steps = workflow_config.get("steps", [])
-        files_response.append({
-            "path": f"configs/config_{config_id}.md",
-            "type": "config",
-            "node_id": config_id,
-            "title": f"Workflow Config {active_version}",
-            "content": f"Configuration for Dr. Sterling.\\nNodes: {len(steps)}",
-            "tags": ["config", "workflow"]
-        })
-
     # Format CoT nodes
     for node in all_nodes:
         node_id = str(node.get("node_id"))

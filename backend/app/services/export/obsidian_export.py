@@ -50,7 +50,7 @@ class ObsidianExportService(ExportService):
             Path of the main config file written.
         """
         config_id = config.get("config_id")
-        doctor_id = config.get("doctor_id")
+        expert_id = config.get("expert_id")
         workflow_config = config.get("workflow_config", {})
         active_version = config.get("active_version", "1.0.0")
         is_feasible = config.get("is_feasible", True)
@@ -64,7 +64,7 @@ class ObsidianExportService(ExportService):
         yaml_lines = [
             "---",
             f"id: {config_id}",
-            f"doctor_id: {doctor_id}",
+            f"expert_id: {expert_id}",
             f"version: {active_version}",
             f"feasible: {str(is_feasible).lower()}",
             "errors: " + json.dumps(errors),

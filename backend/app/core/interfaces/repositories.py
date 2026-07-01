@@ -20,7 +20,7 @@ class ConfigRepository(ABC):
     async def save_expert_config(
         self,
         config_id: UUID,
-        doctor_id: UUID,
+        expert_id: UUID,
         workflow_config: Dict[str, Any],
         active_version: str,
         is_feasible: bool,
@@ -35,8 +35,8 @@ class ConfigRepository(ABC):
         ...
 
     @abstractmethod
-    async def list_configs(self, doctor_id: UUID) -> List[Dict[str, Any]]:
-        """List all configurations for a given doctor."""
+    async def list_configs(self, expert_id: UUID) -> List[Dict[str, Any]]:
+        """List all configurations for a given expert."""
         ...
 
 
@@ -60,16 +60,16 @@ class KnowledgeRepository(ABC):
 
     @abstractmethod
     async def match_knowledge_chunks(
-        self, embedding: List[float], threshold: float, limit: int, operational_mode: str = None
+        self, config_id: UUID, embedding: List[float], threshold: float, limit: int, operational_mode: str = None
     ) -> List[Dict[str, Any]]:
-        """Perform vector similarity search via pgvector HNSW index."""
+        """Perform vector similarity search via pgvector HNSW index, scoped by config_id."""
         ...
 
     @abstractmethod
     async def match_knowledge_chunks_lexical(
-        self, query_text: str, threshold: float, limit: int, operational_mode: str = None
+        self, config_id: UUID, query_text: str, threshold: float, limit: int, operational_mode: str = None
     ) -> List[Dict[str, Any]]:
-        """Perform trigram-based lexical similarity search."""
+        """Perform trigram-based lexical similarity search, scoped by config_id."""
         ...
 
     @abstractmethod
@@ -154,7 +154,7 @@ class SessionRepository(ABC):
 
 
 class WorkflowRepository(ABC):
-    """Persistence contract for doctor_workflows and workflow_tasks."""
+    """Persistence contract for expert_workflows and workflow_tasks."""
     
     @abstractmethod
     async def get_workflow(self, workflow_id: UUID) -> Optional[Dict[str, Any]]:
@@ -169,7 +169,7 @@ class WorkflowRepository(ABC):
         ...
 
     @abstractmethod
-    async def create_workflow(self, config_id: UUID, doctor_id: str, workflow_name: str) -> Dict[str, Any]:
+    async def create_workflow(self, config_id: UUID, expert_id: str, workflow_name: str) -> Dict[str, Any]:
         ...
 
     @abstractmethod
@@ -178,18 +178,18 @@ class WorkflowRepository(ABC):
 
 
 class ThresholdRepository(ABC):
-    """Persistence contract for journalist_entity_thresholds."""
+    """Persistence contract for entity_thresholds."""
     
     @abstractmethod
-    async def get_thresholds_for_doctor(self, doctor_id: str) -> List[Dict[str, Any]]:
+    async def get_thresholds_for_expert(self, expert_id: str) -> List[Dict[str, Any]]:
         ...
 
     @abstractmethod
-    async def get_threshold_by_entity(self, doctor_id: str, entity_name: str) -> Optional[Dict[str, Any]]:
+    async def get_threshold_by_entity(self, expert_id: str, entity_name: str) -> Optional[Dict[str, Any]]:
         ...
 
     @abstractmethod
-    async def save_thresholds(self, config_id: UUID, doctor_id: str, thresholds: List[Dict[str, Any]]) -> None:
+    async def save_thresholds(self, config_id: UUID, expert_id: str, thresholds: List[Dict[str, Any]]) -> None:
         ...
 
 
@@ -245,15 +245,6 @@ class PreConsultRepository(ABC):
         ...
         
     @abstractmethod
-    async def create_appointment(
-        self, patient_id: UUID, session_id: UUID, doctor_id: UUID, scheduled_time: datetime
-    ) -> Dict[str, Any]:
-        ...
-
-    @abstractmethod
-    async def get_patient_appointments(self, patient_id: UUID) -> List[Dict[str, Any]]:
-        ...
-
-    @abstractmethod
-    async def get_all_appointments(self) -> List[Dict[str, Any]]:
+    async def get_active_sessions(self) -> List[Dict[str, Any]]:
+        """Retrieve all sessions currently in active states (GATHERING, SYNTHESIZING, etc.)."""
         ...

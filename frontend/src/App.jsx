@@ -5,12 +5,13 @@ import {
   Play, RotateCcw, Sparkles, Search, Eye, Trash2,
   ChevronDown, ChevronRight, Folder, File,
   ZoomIn, ZoomOut, Maximize2, ShieldCheck,
-  Calendar
+  Calendar, Radio
 } from 'lucide-react';
 import PreConsultation from './PreConsultation';
 import DoctorEscalationQueue from './DoctorEscalationQueue';
 import DoctorAppointments from './DoctorAppointments';
 import WorkflowBuilder from './WorkflowBuilder';
+import LiveSessionMonitor from './LiveSessionMonitor';
 
 const API_BASE = "http://localhost:8000/api";
 const DOCTOR_ID = "4a8f39b6-89d1-4db8-bbbe-d9616e00b8e2";
@@ -140,10 +141,10 @@ const FileTreeNode = ({ node, level, selectedFile, onSelect, onUnlearnSelect }) 
 // Graphical Tree View — Obsidian Mapping visual node graph
 // ═══════════════════════════════════════════════════════════════
 
-const NODE_WIDTH = 200;
-const NODE_HEIGHT = 42;
-const LEVEL_GAP = 110;
-const SIBLING_GAP = 40;
+const NODE_WIDTH = 260;
+const NODE_HEIGHT = 52;
+const LEVEL_GAP = 130;
+const SIBLING_GAP = 56;
 
 // Curated color palette — one per depth layer (cycles if deeper)
 const LAYER_COLORS = [
@@ -353,25 +354,55 @@ const GraphicalTreeView = ({ files, selectedFile, onSelect, onUnlearnSelect }) =
 
               const iconColor = isQuarantined ? 'var(--error)' : layerColor.accent;
 
+              // Derive a clean display name: prefer title, strip UUIDs and .md
+              let displayName = isFile && fileData?.title
+                ? fileData.title
+                : node.name;
+              // Strip .md extension
+              if (displayName.endsWith('.md')) displayName = displayName.slice(0, -3);
+              // Strip UUID patterns (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) 
+              displayName = displayName.replace(/[_-]?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '').trim();
+              // Clean up leading/trailing underscores or dashes
+              displayName = displayName.replace(/^[_-]+|[_-]+$/g, '');
+              // Replace underscores with spaces and capitalize words
+              if (displayName) {
+                displayName = displayName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              }
+              if (!displayName) displayName = node.name;
+
               return (
                 <div
                   key={i}
                   className={className}
                   style={nodeStyle}
                   onClick={handleClick}
-                  title={isFile ? fileData?.path : node.name}
+                  title={isFile ? (fileData?.title || fileData?.path) : node.name}
                 >
-                  {isFolder || isRoot ? (
-                    <Folder size={16} style={{ color: iconColor, flexShrink: 0 }} />
-                  ) : (
-                    <File size={16} style={{ color: iconColor, flexShrink: 0 }} />
-                  )}
-                  <span className="graph-node__label" style={{ color: layerColor.accent }}>{node.name}</span>
-                  {isFile && fileData?.type && (
-                    <span className="graph-node__badge" style={{ background: layerColor.bg, color: layerColor.accent, borderColor: layerColor.border }}>
-                      {fileData.type}
-                    </span>
-                  )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', overflow: 'hidden', width: '100%' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {isFolder || isRoot ? (
+                        <Folder size={18} style={{ color: iconColor, flexShrink: 0 }} />
+                      ) : (
+                        <File size={18} style={{ color: iconColor, flexShrink: 0 }} />
+                      )}
+                      <span className="graph-node__label" style={{ color: layerColor.accent }}>{displayName}</span>
+                    </div>
+                    {isFile && fileData?.content && (
+                      <span style={{ 
+                        fontSize: '11px', 
+                        color: 'var(--text-secondary)', 
+                        display: '-webkit-box',
+                        WebkitLineClamp: 3,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        lineHeight: '1.4',
+                        marginTop: '2px'
+                      }}>
+                        {fileData.content}
+                      </span>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -1373,6 +1404,14 @@ ${file.content || ''}
           </button>
 
           <button
+            className={`nav-link w-full ${activeTab === 'live-monitor' ? 'active' : ''}`}
+            onClick={() => setActiveTab('live-monitor')}
+          >
+            <Radio size={18} style={{ color: activeTab === 'live-monitor' ? 'inherit' : 'var(--success)' }} />
+            <span>Live Monitor</span>
+          </button>
+
+          <button
             className={`nav-link w-full ${activeTab === 'appointments' ? 'active' : ''}`}
             onClick={() => setActiveTab('appointments')}
           >
@@ -1733,39 +1772,34 @@ ${file.content || ''}
               <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', padding: '0', overflow: 'hidden', flex: 1, minHeight: '320px' }}>
                 <div style={{ padding: '16px', borderBottom: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.2)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Eye size={16} style={{ color: 'var(--primary)' }} />
-                  <h3 style={{ fontSize: '14px', margin: 0, fontFamily: 'monospace' }}>
-                    {selectedObsidianFile ? selectedObsidianFile.path : 'Select a node'}
+                  <h3 style={{ fontSize: '16px', margin: 0, fontWeight: 600 }}>
+                    {(() => {
+                      if (!selectedObsidianFile) return 'Select a node';
+                      let t = selectedObsidianFile.title || selectedObsidianFile.path;
+                      if (t.endsWith('.md')) t = t.slice(0, -3);
+                      t = t.replace(/[_-]?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '').trim();
+                      t = t.replace(/^[_-]+|[_-]+$/g, '');
+                      return t ? t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Selected Node';
+                    })()}
                   </h3>
                 </div>
                 <div style={{
                   flex: 1,
-                  padding: '20px',
+                  padding: '24px',
                   overflowY: 'auto',
-                  fontFamily: 'monospace',
-                  fontSize: '13px',
-                  lineHeight: '1.6',
-                  background: selectedObsidianFile?.quarantine_status ? 'rgba(255,50,50,0.02)' : 'transparent'
+                  fontFamily: 'var(--font-sans)',
+                  fontSize: '15px',
+                  lineHeight: '1.7',
+                  background: selectedObsidianFile?.quarantine_status ? 'rgba(255,50,50,0.02)' : 'transparent',
+                  color: 'var(--text-primary)'
                 }}>
                   {selectedObsidianFile ? (
-                    <pre style={{ whiteSpace: 'pre-wrap', margin: 0, wordWrap: 'break-word' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>
-                        {(() => {
-                          const md = generateMarkdown(selectedObsidianFile);
-                          const parts = md.split('\n---');
-                          return parts[0] + '\n---';
-                        })()}
-                      </span>
-                      <span style={{ color: 'var(--text-primary)' }}>
-                        {(() => {
-                          const md = generateMarkdown(selectedObsidianFile);
-                          const parts = md.split('\n---');
-                          return parts.slice(1).join('\n---');
-                        })()}
-                      </span>
-                    </pre>
+                    <div style={{ whiteSpace: 'pre-wrap', wordWrap: 'break-word' }}>
+                      {selectedObsidianFile.content || 'No content available.'}
+                    </div>
                   ) : (
-                    <div style={{ color: 'var(--text-muted)', display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: '13px' }}>
-                      Click a node in the Knowledge Graph to view its projected SSOT state.
+                    <div style={{ color: 'var(--text-muted)', display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: '14px' }}>
+                      Click a node in the Knowledge Graph to view its content.
                     </div>
                   )}
                 </div>
@@ -1777,17 +1811,27 @@ ${file.content || ''}
 
                 {unlearnStep === 0 && (
                   <>
-                    <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
                       Mom-and-Child Unlearning Protocol: Nullifies embedding vector in the SSOT database to disable semantic retrieve paths, while keeping YAML audit logs intact.
                     </p>
                     <div className="input-group">
-                      <span className="input-label">Target Node ID</span>
-                      <input
-                        className="form-input"
-                        placeholder="UUID"
-                        value={unlearnNodeInput}
-                        onChange={e => setUnlearnNodeInput(e.target.value)}
-                      />
+                      <span className="input-label">Target Node</span>
+                      <div style={{ 
+                        padding: '12px 16px', 
+                        background: 'rgba(0,0,0,0.3)', 
+                        borderRadius: 'var(--radius-md)', 
+                        border: '1px solid var(--border-light)',
+                        color: unlearnNodeInput ? 'var(--text-primary)' : 'var(--text-muted)',
+                        fontSize: '14px'
+                      }}>
+                        {unlearnNodeInput ? (() => {
+                          let t = selectedObsidianFile?.title || selectedObsidianFile?.path || unlearnNodeInput;
+                          if (t.endsWith('.md')) t = t.slice(0, -3);
+                          t = t.replace(/[_-]?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '').trim();
+                          t = t.replace(/^[_-]+|[_-]+$/g, '');
+                          return t ? t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Selected Node';
+                        })() : 'No node selected (Click a node above)'}
+                      </div>
                     </div>
                     <div className="input-group">
                       <span className="input-label">Retraction Rationale</span>
@@ -1964,6 +2008,13 @@ ${file.content || ''}
         {activeTab === 'escalation' && (
           <div style={{ marginTop: '10px' }}>
             <DoctorEscalationQueue />
+          </div>
+        )}
+
+        {/* LIVE SESSION MONITOR TAB */}
+        {activeTab === 'live-monitor' && (
+          <div style={{ marginTop: '10px' }}>
+            <LiveSessionMonitor />
           </div>
         )}
 

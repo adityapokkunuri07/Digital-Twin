@@ -8,6 +8,7 @@ from uuid import uuid4
 # Import saga components
 from backend.app.services.saga_orchestrator import SagaOrchestrator, generate_idempotency_key
 from backend.app.services.reconciliation import OutboxReconciliationCron
+from backend.app.core.enums import SessionStatus
 
 @pytest.fixture
 def mock_db_pool():
@@ -70,11 +71,10 @@ async def test_saga_transient_failure_retry_success(mock_db_pool, mock_http_clie
     result_status = await orchestrator.run(session_id, "2026-06-08", "09:00")
     
     # Assertions
-    assert result_status == "BOOKED"
+    assert result_status == SessionStatus.COMPLETE_BOOKED
     # Ensure state transitioned to INITIATING_BOOKING first, then BOOKED
-    assert conn.execute.call_count >= 2
-    assert any("INITIATING_BOOKING" in str(arg) for arg in conn.execute.call_args_list[0][0])
-    assert any("BOOKED" in str(arg) for arg in conn.execute.call_args_list[1][0])
+    assert any(arg == SessionStatus.PROCESSING_BOOKING for arg in conn.execute.call_args_list[0][0])
+    assert any(arg == SessionStatus.COMPLETE_BOOKED for arg in conn.execute.call_args_list[1][0])
 
 # ─── Test Case 3: Permanent External API Failure (Compensating Rollback) ──
 
@@ -97,9 +97,9 @@ async def test_saga_permanent_conflict_rollback(mock_db_pool, mock_http_client):
     result_status = await orchestrator.run(session_id, "2026-06-08", "09:00")
     
     # Assertions
-    assert result_status == "FAILED_REVIEW"
+    assert result_status == SessionStatus.FAILED_BOOKING
     # Ensure local database rolled back state to lock release/failure state
-    assert any("FAILED_REVIEW" in str(arg) or "AVAILABLE" in str(arg) for arg in conn.execute.call_args_list[-1][0])
+    assert any(arg == SessionStatus.FAILED_BOOKING for arg in conn.execute.call_args_list[-1][0])
 
 # ─── Test Case 4: Worker Crash/OOM Recovery (Reconciliation Cron) ──────
 
@@ -112,7 +112,7 @@ async def test_reconciliation_cron_resolves_hung_states(mock_db_pool, mock_http_
         "session_id": str(uuid4()),
         "preferred_date": "2026-06-08",
         "time_slot": "09:00",
-        "status": "INITIATING_BOOKING"
+        "status": SessionStatus.PROCESSING_BOOKING.value
     }
     conn.fetch = AsyncMock(return_value=[hung_booking])
     
@@ -133,4 +133,4 @@ async def test_reconciliation_cron_resolves_hung_states(mock_db_pool, mock_http_
     # The cron queried the downstream API using the correct GET filters
     mock_http_client.get.assert_called_once()
     # The cron updated the database status to BOOKED because downstream confirmed it
-    assert any("BOOKED" in str(arg) for arg in conn.execute.call_args_list[0][0])
+    assert any(arg == SessionStatus.COMPLETE_BOOKED for arg in conn.execute.call_args_list[0][0])

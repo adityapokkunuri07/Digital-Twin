@@ -66,11 +66,11 @@ class SupabaseDatabaseService(
     # --- ConfigRepository delegation ---
 
     async def save_expert_config(
-        self, config_id: UUID, doctor_id: UUID, workflow_config: Dict[str, Any],
+        self, config_id: UUID, expert_id: UUID, workflow_config: Dict[str, Any],
         active_version: str, is_feasible: bool, validation_errors: List[str],
     ) -> Dict[str, Any]:
         return await self._config_repo.save_expert_config(
-            config_id, doctor_id, workflow_config,
+            config_id, expert_id, workflow_config,
             active_version, is_feasible, validation_errors,
         )
 
@@ -88,17 +88,17 @@ class SupabaseDatabaseService(
         return await self._knowledge_repo.save_knowledge_chunks(config_id, chunks)
 
     async def match_knowledge_chunks(
-        self, embedding: List[float], threshold: float, limit: int
+        self, config_id: UUID, embedding: List[float], threshold: float, limit: int, operational_mode: str = None
     ) -> List[Dict[str, Any]]:
         return await self._knowledge_repo.match_knowledge_chunks(
-            embedding, threshold, limit,
+            config_id, embedding, threshold, limit, operational_mode
         )
 
     async def match_knowledge_chunks_lexical(
-        self, query_text: str, threshold: float, limit: int
+        self, config_id: UUID, query_text: str, threshold: float, limit: int, operational_mode: str = None
     ) -> List[Dict[str, Any]]:
         return await self._knowledge_repo.match_knowledge_chunks_lexical(
-            query_text, threshold, limit,
+            config_id, query_text, threshold, limit, operational_mode
         )
 
     async def get_knowledge_chunk_by_path(

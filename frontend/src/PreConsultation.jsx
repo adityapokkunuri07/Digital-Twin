@@ -81,7 +81,7 @@ export default function PreConsultation() {
     if (!sessionId) return;
     
     // Poll for status transitions and injected messages from doctor
-    if (status === 'SYNTHESIZING' || status === 'SYNTHESIZING_PARTIAL' || status === 'PENDING_REVIEW' || status === 'ALIGNING') {
+    if (status === 'processing_synthesis' || status === 'processing_partial_synthesis' || status === 'awaiting_expert_intervention' || status === 'awaiting_booking' || status === 'SYNTHESIZING' || status === 'SYNTHESIZING_PARTIAL' || status === 'PENDING_REVIEW' || status === 'ALIGNING') {
       const interval = setInterval(async () => {
         try {
           const res = await fetch(`${API_BASE}/pre-consult/session/${sessionId}`);
@@ -179,7 +179,7 @@ export default function PreConsultation() {
 
   const startSession = async () => {
     try {
-      const res = await fetch(`${API_BASE}/pre-consult/start`, {
+      const res = await fetch(`${API_BASE}/gateway/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ patient_id: patient.id, config_id: CONFIG_ID })
@@ -207,7 +207,7 @@ export default function PreConsultation() {
     setChatLog(prev => [...prev, { sender: 'PATIENT', text: userMsg }]);
 
     try {
-      const res = await fetch(`${API_BASE}/pre-consult/chat`, {
+      const res = await fetch(`${API_BASE}/gateway/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId, message: userMsg })
@@ -245,7 +245,7 @@ export default function PreConsultation() {
         body: JSON.stringify({ session_id: sessionId, doctor_review_notes: doctorNotes })
       });
       const data = await res.json();
-      setStatus(data.status); // Should move to ALIGNING
+      setStatus(data.status); // Should move to awaiting_booking
     } catch (err) {
       console.error(err);
     }
@@ -263,7 +263,7 @@ export default function PreConsultation() {
         body: JSON.stringify({ 
           session_id: sessionId,
           patient_id: patient.id,
-          doctor_id: DOCTOR_ID, 
+          expert_id: DOCTOR_ID, 
           scheduled_time: scheduledTime 
         })
       });
@@ -273,7 +273,7 @@ export default function PreConsultation() {
         throw new Error(data.detail || "Failed to book appointment");
       }
       
-      setStatus('BOOKED');
+      setStatus('complete_booked');
       setBookingConfirmed(true);
     } catch (err) {
       console.error(err);
@@ -463,7 +463,7 @@ export default function PreConsultation() {
             <div className="animate-pulse-ring" style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(10, 132, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '32px' }}>
               <Activity size={40} style={{ color: 'var(--primary)' }} />
             </div>
-            <h2 style={{ marginBottom: '12px', fontSize: '24px', fontWeight: 600 }}>Begin Pre-Consultation</h2>
+            <h2 style={{ marginBottom: '12px', fontSize: '24px', fontWeight: 600 }}>Begin AI Consultation</h2>
             <p style={{ color: 'var(--text-secondary)', textAlign: 'center', maxWidth: '380px', marginBottom: '40px', lineHeight: 1.6 }}>
               Our clinical AI will securely gather your vitals and symptoms to prepare for your appointment with Dr. Sterling.
             </p>
@@ -512,9 +512,9 @@ export default function PreConsultation() {
               <div ref={chatEndRef} />
             </div>
 
-            {/* Chat Input Area (Disabled if not GATHERING) */}
+            {/* Chat Input Area */}
             <div style={{ padding: '16px 24px', borderTop: '1px solid rgba(255,255,255,0.05)', background: 'rgba(28, 28, 30, 0.6)', backdropFilter: 'blur(20px)' }}>
-              {status === 'GATHERING' ? (
+              {status === 'GATHERING' || status === 'awaiting_user_input' || status === 'probing' ? (
                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                   <input 
                     className="form-input" 
@@ -530,12 +530,12 @@ export default function PreConsultation() {
                 </div>
               ) : (
                 <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px', padding: '16px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                  {status === 'SYNTHESIZING' || status === 'SYNTHESIZING_PARTIAL' ? (
+                  {status === 'SYNTHESIZING' || status === 'SYNTHESIZING_PARTIAL' || status === 'processing_synthesis' || status === 'processing_partial_synthesis' ? (
                     <>
                       <div className="animate-spin-fast"><Activity size={24} style={{ color: 'var(--primary)' }} /></div>
                       AI is compiling your file...
                     </>
-                  ) : status === 'PENDING_REVIEW' ? (
+                  ) : status === 'PENDING_REVIEW' || status === 'awaiting_expert_intervention' ? (
                     <>
                       <ShieldCheck size={28} style={{ color: 'var(--success)' }} />
                       <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>File Sent to Doctor</div>
@@ -553,14 +553,14 @@ export default function PreConsultation() {
       {sessionId && (
         <div style={{ width: '400px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
-          {/* Booking Interface (Unlocks at ALIGNING) */}
-          {(status === 'ALIGNING' || status === 'BOOKED') && (
+          {/* Booking Interface (Unlocks at awaiting_booking) */}
+          {(status === 'ALIGNING' || status === 'awaiting_booking' || status === 'BOOKED' || status === 'complete_booked') && (
             <div className="glass-card" style={{ padding: '24px', borderRadius: '32px' }}>
               <h3 style={{ margin: '0 0 20px 0', display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-primary)', fontSize: '20px', fontWeight: 600 }}>
                 <Calendar size={24} style={{ color: 'var(--primary)' }} /> Schedule
               </h3>
               
-              {status === 'BOOKED' ? (
+              {status === 'BOOKED' || status === 'complete_booked' ? (
                 <div style={{ textAlign: 'center', padding: '16px 0', animation: 'scaleUp 0.5s ease' }}>
                   <CheckCircle2 size={56} style={{ color: 'var(--success)', margin: '0 auto 16px', filter: 'drop-shadow(0 4px 12px rgba(50, 215, 75, 0.4))' }} />
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '20px' }}>Booking Confirmed</h4>

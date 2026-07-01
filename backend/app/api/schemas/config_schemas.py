@@ -17,7 +17,7 @@ class ValidateConfigRequest(BaseModel):
 class SaveConfigRequest(BaseModel):
     """Request payload for saving/upserting a twin configuration."""
     config_id: Optional[UUID] = None
-    doctor_id: UUID
+    expert_id: UUID
     workflow_config: Dict[str, Any]
     active_version: str = "1.0.0"
 

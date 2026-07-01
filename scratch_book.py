@@ -5,12 +5,12 @@ import datetime
 
 session_id = str(uuid.uuid4())
 patient_id = str(uuid.uuid4())
-doctor_id = str(uuid.uuid4())
+expert_id = str(uuid.uuid4())
 
 data = json.dumps({
     "session_id": session_id,
     "patient_id": patient_id,
-    "doctor_id": doctor_id,
+    "expert_id": expert_id,
     "scheduled_time": datetime.datetime.now().isoformat()
 }).encode("utf-8")
 

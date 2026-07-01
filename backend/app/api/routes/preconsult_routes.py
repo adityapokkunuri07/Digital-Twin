@@ -92,21 +92,15 @@ async def book_appointment(
 ):
     """Task 4: AI Coordinator completes the booking."""
     response = await service.book_appointment(
-        payload.session_id, payload.patient_id, payload.doctor_id, payload.scheduled_time
+        payload.session_id, payload.patient_id, payload.expert_id, payload.scheduled_time
     )
     return response
 
-@router.get("/appointments/patient/{patient_id}")
-async def get_patient_appointments(
-    patient_id: UUID,
-    service: PreConsultationService = Depends(get_preconsult_service),
-):
-    """Fetch all appointments for a given patient."""
-    return await service.get_patient_appointments(patient_id)
 
-@router.get("/appointments/all")
-async def get_all_appointments(
+
+@router.get("/queue/active")
+async def get_active_sessions(
     service: PreConsultationService = Depends(get_preconsult_service),
 ):
-    """Fetch all appointments across the system for the Doctor Control Plane."""
-    return await service.get_all_appointments()
+    """Fetch all sessions currently in active states for the Live Session Monitor."""
+    return await service.get_active_sessions()

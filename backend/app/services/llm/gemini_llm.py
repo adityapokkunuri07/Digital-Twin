@@ -27,7 +27,7 @@ class GeminiLLMService:
             except Exception as e:
                 logger.warning(f"Gemini client failed to load: {e}. Falling back to mock LLM.")
 
-    def extract_variables(self, text: str, variables: List[str]) -> Dict[str, Any]:
+    def extract_variables(self, text: str, variables: List[str], context_window: str = "") -> Dict[str, Any]:
         """Dynamically extract requested variables from user input."""
         if not variables:
             return {}
@@ -36,10 +36,11 @@ class GeminiLLMService:
             return {v: "Mock Extracted Data" for v in variables}
             
         prompt = f"""
-You are an expert medical data extraction assistant.
+You are a structured data extraction assistant.
 Extract the following variables from the user's input: {variables}.
 If a variable is not mentioned or implied in the input, do not include it in the output.
 User input: "{text}"
+Recent Chat History for context: "{context_window}"
 Return ONLY a valid JSON object where keys are the extracted variables.
 """
         try:
@@ -62,8 +63,8 @@ Return ONLY a valid JSON object where keys are the extracted variables.
             return f"Could you please tell me about: {', '.join(missing_inputs)}?"
             
         prompt = f"""
-You are an empathetic, professional AI doctor assistant.
-The patient has already provided the following information: {gathered}.
+You are a professional, empathetic assistant.
+The user has already provided the following information: {gathered}.
 Additional Context/History:
 {context_window}
 
@@ -92,13 +93,13 @@ Keep it concise and professional.
             return {o: "Mock Evaluated Data" for o in outputs}
             
         prompt = f"""
-You are an expert clinical reasoning engine.
-Your task is to execute a step in a medical workflow.
+You are a structured data processing assistant.
+Your task is to execute a step in a configured workflow.
 Step Name: {step_name}
 Inputs available: {inputs}
-Additional Medical Context/History (if any): {context_window}
+Additional Context (if any): {context_window}
 
-Based on the inputs and clinical knowledge, compute and return the following outputs: {outputs}.
+Based on the inputs and relevant context, compute and return the following outputs: {outputs}.
 Return ONLY a valid JSON object mapping each requested output variable to its computed value.
 """
         try:

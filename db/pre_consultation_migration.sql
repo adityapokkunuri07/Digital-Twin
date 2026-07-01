@@ -75,7 +75,7 @@ CREATE INDEX IF NOT EXISTS idx_preconsult_sessions_patient ON pre_consultation_s
 CREATE INDEX IF NOT EXISTS idx_interaction_logs_session ON interaction_logs(session_id);
 CREATE INDEX IF NOT EXISTS idx_preconsult_summaries_session ON pre_consult_summaries(session_id);
 CREATE INDEX IF NOT EXISTS idx_preconsult_summaries_embedding ON pre_consult_summaries USING hnsw (summary_embedding vector_cosine_ops);
-CREATE INDEX IF NOT EXISTS idx_appointments_patient ON appointments(patient_id);
+
 
 -- 4. Atomic RPC for State Sync & Summary Insertion
 CREATE OR REPLACE FUNCTION atomic_insert_summary_and_update_state(
@@ -116,6 +116,22 @@ $$ LANGUAGE plpgsql;
 
 -- 5. Disable RLS for development
 ALTER TABLE pre_consultation_sessions DISABLE ROW LEVEL SECURITY;
+
+--- VERTICAL: HEALTHCARE ---
+-- 5. Appointments Table (For Booking Saga)
+CREATE TABLE IF NOT EXISTS appointments (
+    appointment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    patient_id UUID REFERENCES patients(patient_id),
+    session_id UUID REFERENCES pre_consultation_sessions(session_id),
+    expert_id UUID NOT NULL,
+    scheduled_time TIMESTAMP WITH TIME ZONE NOT NULL,
+    status VARCHAR(50) DEFAULT 'SCHEDULED', -- SCHEDULED, COMPLETED, CANCELLED
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Ensure a doctor can't be double booked at the exact same time
+    UNIQUE (expert_id, scheduled_time)
+);
+CREATE INDEX IF NOT EXISTS idx_appointments_patient ON appointments(patient_id);
+ALTER TABLE appointments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE interaction_logs DISABLE ROW LEVEL SECURITY;
 ALTER TABLE pre_consult_summaries DISABLE ROW LEVEL SECURITY;
-ALTER TABLE appointments DISABLE ROW LEVEL SECURITY;

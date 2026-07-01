@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class ThresholdSafetyRule(SafetyRule):
     """
     Validates extracted telemetry against the deterministic thresholds
-    hydrated from `journalist_entity_thresholds`.
+    hydrated from `entity_thresholds`.
     """
 
     def evaluate(

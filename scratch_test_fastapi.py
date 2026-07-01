@@ -14,7 +14,7 @@ supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
 # 1. Create a dummy session in ALIGNING state
 session_id = str(uuid.uuid4())
 patient_id = "40623c61-8cd8-413f-a65e-c7cc9f3cdcc3"
-doctor_id = "4a8f39b6-89d1-4db8-bbbe-d9616e00b8e2"
+expert_id = "4a8f39b6-89d1-4db8-bbbe-d9616e00b8e2"
 
 supabase.table("pre_consultation_sessions").insert({
     "session_id": session_id,

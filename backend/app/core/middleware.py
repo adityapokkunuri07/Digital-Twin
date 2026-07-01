@@ -57,6 +57,10 @@ class PIISanitizationMiddleware(BaseHTTPMiddleware):
         self.anonymizer = PIIAnonymizer()
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        # Bypass auth routes to avoid breaking login/registration (emails are required)
+        if request.url.path.startswith("/api/auth"):
+            return await call_next(request)
+
         # We only sanitize JSON requests
         content_type = request.headers.get("content-type", "")
         if "application/json" not in content_type:
@@ -77,8 +81,15 @@ class PIISanitizationMiddleware(BaseHTTPMiddleware):
         # Walk JSON and replace PII
         pii_map: Dict[str, str] = {}
         
+        import uuid
         def sanitize_value(val: Any) -> Any:
             if isinstance(val, str):
+                # Do not sanitize UUIDs as they often look like phone numbers to the regex
+                try:
+                    uuid.UUID(val)
+                    return val
+                except ValueError:
+                    pass
                 return self.anonymizer.anonymize(val, pii_map)
             elif isinstance(val, dict):
                 return {k: sanitize_value(v) for k, v in val.items()}
@@ -92,12 +103,17 @@ class PIISanitizationMiddleware(BaseHTTPMiddleware):
         # Set custom state to carry the map to response phase
         request.state.pii_map = pii_map
 
-        # Create a new receive channel containing the sanitized request body
-        async def receive():
-            return {"type": "http.request", "body": new_body, "more_body": False}
+        # Update the cached body
+        request._body = new_body
 
-        # Override request receive method
-        request._receive = receive
+        # Update Content-Length header in scope to match the new body length
+        new_headers = []
+        for name, value in request.scope["headers"]:
+            if name == b"content-length":
+                new_headers.append((name, str(len(new_body)).encode("utf-8")))
+            else:
+                new_headers.append((name, value))
+        request.scope["headers"] = new_headers
 
         # Execute downstream endpoints
         response = await call_next(request)

@@ -2,7 +2,7 @@
 -- FULL SAMPLE DATA — Digital Twin (Cardiologist: Dr. Meera Sharma)
 -- =============================================================================
 -- Fixed UUIDs for easy cross-referencing:
---   doctor_id  : 22222222-2222-2222-2222-222222222222
+--   expert_id  : 22222222-2222-2222-2222-222222222222
 --   config_id  : 11111111-1111-1111-1111-111111111111
 --   patient_1  : aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaa001
 --   patient_2  : aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaa002
@@ -39,7 +39,7 @@ ON CONFLICT (patient_id) DO NOTHING;
 -- ─────────────────────────────────────────────
 -- 1. EXPERT TWIN CONFIG (Dr. Meera Sharma — Cardiologist)
 -- ─────────────────────────────────────────────
-INSERT INTO expert_twin_configs (config_id, doctor_id, workflow_config, active_version, is_feasible)
+INSERT INTO expert_twin_configs (config_id, expert_id, workflow_config, active_version, is_feasible)
 VALUES (
     '11111111-1111-1111-1111-111111111111',
     '22222222-2222-2222-2222-222222222222',
@@ -410,7 +410,7 @@ VALUES (
 -- ─────────────────────────────────────────────
 -- 8. APPOINTMENTS
 -- ─────────────────────────────────────────────
-INSERT INTO appointments (appointment_id, patient_id, session_id, doctor_id, scheduled_time, status)
+INSERT INTO appointments (appointment_id, patient_id, session_id, expert_id, scheduled_time, status)
 VALUES (
     'ffffffff-ffff-ffff-ffff-ffffffffffff',
     'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaa001',
