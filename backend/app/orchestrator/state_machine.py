@@ -253,14 +253,14 @@ class ZeroTrustOrchestrator:
 
     async def _save_state(self, session_id: UUID, state: AgentState):
         chunk_ids = []
-        await self._session_repo.create_execution_trace(
-            session_id, state["current_node"], state["user_query"],
-            state["output_message"], chunk_ids, state["classification_score"],
-        )
         await self._session_repo.save_active_session(
             session_id, UUID(state["conversation_id"]), UUID(state["config_id"]),
             state["current_node"], state,
             state["is_paused"], state["requires_review"],
+        )
+        await self._session_repo.create_execution_trace(
+            session_id, state["current_node"], state.get("user_query", ""),
+            state.get("output_message", ""), chunk_ids, state.get("classification_score", 0.0),
         )
 
     async def execute_synthesis_subgraph(self, session_id: UUID, is_partial: bool, reason: str):

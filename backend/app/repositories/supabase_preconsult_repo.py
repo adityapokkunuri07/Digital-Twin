@@ -29,7 +29,10 @@ class SupabasePreConsultRepository(SupabaseClientMixin, PreConsultRepository):
     async def create_session(
         self, patient_id: UUID, config_id: UUID, workflow_id: UUID, configuration_snapshot: Dict[str, Any]
     ) -> Dict[str, Any]:
+        from uuid import uuid4
+        session_id = uuid4()
         record = {
+            "session_id": str(session_id),
             "patient_id": str(patient_id),
             "config_id": str(config_id),
             "status": "GATHERING",
@@ -44,9 +47,7 @@ class SupabasePreConsultRepository(SupabaseClientMixin, PreConsultRepository):
             record["workflow_id"] = str(workflow_id)
         
         if self.use_mock:
-            session_id = str(UUID(int=1)) # Mock UUID
-            record["session_id"] = session_id
-            self._sessions[session_id] = record
+            self._sessions[str(session_id)] = record
             return record
             
         res = self.client.table("pre_consultation_sessions").insert(record).execute()
@@ -58,6 +59,20 @@ class SupabasePreConsultRepository(SupabaseClientMixin, PreConsultRepository):
             return self._sessions.get(sid_str)
             
         res = self.client.table("pre_consultation_sessions").select("*, patients!fk_patient(full_name, email)").eq("session_id", sid_str).execute()
+        return res.data[0] if res.data else None
+
+    async def get_latest_session(self, patient_id: UUID, config_id: UUID) -> Optional[Dict[str, Any]]:
+        if self.use_mock:
+            matches = [s for s in self._sessions.values() if s.get("patient_id") == str(patient_id) and s.get("config_id") == str(config_id)]
+            return matches[-1] if matches else None
+            
+        res = self.client.table("pre_consultation_sessions")\
+            .select("*")\
+            .eq("patient_id", str(patient_id))\
+            .eq("config_id", str(config_id))\
+            .order("updated_at", desc=True)\
+            .limit(1)\
+            .execute()
         return res.data[0] if res.data else None
 
     async def update_session_state(

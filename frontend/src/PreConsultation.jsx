@@ -514,7 +514,7 @@ export default function PreConsultation() {
 
             {/* Chat Input Area */}
             <div style={{ padding: '16px 24px', borderTop: '1px solid rgba(255,255,255,0.05)', background: 'rgba(28, 28, 30, 0.6)', backdropFilter: 'blur(20px)' }}>
-              {status === 'GATHERING' || status === 'awaiting_user_input' || status === 'probing' ? (
+              {status === 'READY' || status === 'GATHERING' || status === 'awaiting_user_input' || status === 'probing' ? (
                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                   <input 
                     className="form-input" 

@@ -51,6 +51,44 @@ class PreConsultationService:
 
     async def start_session(self, patient_id: UUID, config_id: UUID) -> Dict[str, Any]:
         """Task 1 Init: Create a new session with hydrated configuration snapshot."""
+        
+        # Check for existing session
+        latest_session = await self._repo.get_latest_session(patient_id, config_id)
+        injected_context = ""
+        
+        if latest_session:
+            import datetime
+            
+            updated_at_str = latest_session.get("updated_at")
+            if updated_at_str:
+                # Handle supabase ISO format potentially ending in Z
+                if updated_at_str.endswith('Z'):
+                    updated_at_str = updated_at_str[:-1] + '+00:00'
+                updated_at = datetime.datetime.fromisoformat(updated_at_str)
+                if updated_at.tzinfo is None:
+                    updated_at = updated_at.replace(tzinfo=datetime.timezone.utc)
+                now = datetime.datetime.now(datetime.timezone.utc)
+                age = now - updated_at
+                
+                if latest_session.get("status") not in ["BOOKED", "complete_booked"]:
+                    if age.total_seconds() < 24 * 3600:
+                        logger.info(f"Resuming recent session {latest_session['session_id']}")
+                        # Fetch the active state to ensure it's still available in orchestrator
+                        active_state = await self._orchestrator._session_repo.get_active_session(UUID(str(latest_session["session_id"])))
+                        if active_state:
+                            return latest_session
+            
+            # If we didn't resume, prepare injected context from previous session
+            prev_entities = latest_session.get("current_extracted_entities", {})
+            if prev_entities:
+                import json
+                injected_context = (
+                    f"System Note: The account owner had a previous session with these symptoms: "
+                    f"{json.dumps(prev_entities)}. Goal 1: Determine if the current user is continuing that issue "
+                    f"OR starting a new issue. Goal 2: Determine if this consultation is for themselves or someone else "
+                    f"(extract as `target_patient_relation`). If it is for someone else, completely ignore the previous symptoms."
+                )
+
         # 1. Hydrate the workflow configuration
         # Temporarily use doctor_workflows until DB migration is run
         wf_res = self._repo.client.table("doctor_workflows").select("id").eq("config_id", str(config_id)).execute()
@@ -64,7 +102,7 @@ class PreConsultationService:
                 "task_name": "Initial Assessment",
                 "node_alignment": "data_gathering",
                 "strategy_identifier": "GENERAL_INTAKE",
-                "task_config": {"required_variables": ["primary_concern", "urgency_level"]}
+                "task_config": {"required_variables": ["primary_concern", "urgency_level", "target_patient_relation"]}
             }]
             thresholds = [{
                 "entity_name": "urgency_level",
@@ -108,7 +146,7 @@ class PreConsultationService:
             "user_query": "",
             "extracted_telemetry": {},
             "configuration_snapshot": configuration_snapshot,
-            "retrieved_context": "",
+            "retrieved_context": injected_context,
             "output_message": "",
             "requires_review": False,
             "is_paused": False,

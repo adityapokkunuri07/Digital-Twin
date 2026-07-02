@@ -50,7 +50,7 @@ VALUES (
             {
                 "id": "step_1",
                 "name": "Intake Vitals",
-                "inputs": ["temperature", "blood_pressure_systolic", "blood_pressure_diastolic", "chest_pain"],
+                "inputs": ["target_patient_relation", "temperature", "blood_pressure_systolic", "blood_pressure_diastolic", "chest_pain"],
                 "outputs": ["vitals_collected"],
                 "dependencies": []
             },
